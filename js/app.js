@@ -73,9 +73,16 @@ function renderPicks() {
   const sample = (arr, n) => [...arr].sort(() => Math.random() - 0.5).slice(0, n);
   // A spread of the archive: spaced apart so the first picks are informative.
   pickSet = spread([...sample(photos, 120)], 16).concat(spread(sample(texts, 60), 8)).sort(() => Math.random() - 0.5);
+  let photoIndex = 0;
   for (const it of pickSet) {
     const picked = T.labels.get(it.id)?.y === 1;
-    const b = el("button", { class: "pick", "aria-pressed": String(picked), onclick: () => {
+    let size;
+    if (it.kind === "text") {
+      size = it.text.length < 180 ? "short" : it.text.length < 460 ? "medium" : "long";
+    } else {
+      size = ["compact", "standard", "tall"][photoIndex++ % 3];
+    }
+    const b = el("button", { class: `pick size-${size}`, "aria-pressed": String(picked), onclick: () => {
       b.setAttribute("aria-pressed", String(b.getAttribute("aria-pressed") !== "true"));
       updatePickCount();
     } },

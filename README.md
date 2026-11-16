@@ -11,7 +11,7 @@ Inspiration for photographers and writers that learns your taste.
 
 ## Files
 - `index.html`, `style.css`, `js/` — the site (no build step).
-- `js/lens.js` — the cursor as a lens: words come into focus under it, photos get a viewfinder frame.
+- `js/lens.js` — the cursor gently underlines the nearby word without blurring the passage; pick photos respond with a local hover zoom.
 - `js/coach_data.js` — the teammate's categories, exercises, suggestions and diagnosis rules.
 - `tools/build_data.py` — builds `data/items.json` and `data/emb.bin` from the Library of Congress, Art Institute of Chicago, The Met and Project Gutenberg.
 
