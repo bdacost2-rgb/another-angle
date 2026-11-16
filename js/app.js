@@ -82,7 +82,7 @@ function renderPicks() {
     } else {
       size = ["compact", "standard", "tall"][photoIndex++ % 3];
     }
-    const b = el("button", { class: `pick size-${size}`, "aria-pressed": String(picked), onclick: () => {
+    const b = el("button", { class: `pick pick-${it.kind} size-${size}`, "aria-pressed": String(picked), onclick: () => {
       b.setAttribute("aria-pressed", String(b.getAttribute("aria-pressed") !== "true"));
       updatePickCount();
     } },
