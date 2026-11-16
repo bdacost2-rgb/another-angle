@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Another Angle</title>
+  <meta name="description" content="Inspiration for photographers and writers that learns your taste, from public-domain archives, with a writer's block coach.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='12' fill='%23b4532a'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23f6f2ea'/%3E%3C/svg%3E">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="#" data-go="feed">Another Angle</a>
+    <form class="search" id="search" role="search">
+      <label for="q" class="sr">Search by a feeling, a place, or anything</label>
+      <input id="q" type="search" placeholder="Search a feeling: quiet desert heat, first snow…" autocomplete="off">
+    </form>
+    <nav class="nav">
+      <label class="btn ghost" for="upload" title="Find inspiration that matches your own photo">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+        <span>Your photo</span>
+      </label>
+      <input id="upload" type="file" accept="image/*" class="sr">
+      <a class="btn ghost" href="uncharted.html" title="Explore the empty places your taste points to">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/></svg>
+        <span>Uncharted</span>
+      </a>
+      <button class="btn ghost" data-go="mine" title="Your own photos, kept on your device">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 16l5-5 4 4 2-2 5 5"/></svg>
+        <span>My photos</span>
+      </button>
+      <button class="btn ghost" data-go="saved">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg>
+        <span>Saved <b id="saved-count">0</b></span>
+      </button>
+      <button class="btn solid" id="open-coach">I'm stuck</button>
+    </nav>
+  </header>
+
+  <main>
+    <section id="view-start" class="view" hidden>
+      <div class="intro">
+        <h1>Pick what moves you.</h1>
+        <p>Photos and passages from public-domain archives. Choose at least 8 that you love, for any reason. Another Angle learns your taste from them and keeps learning as you go.</p>
+      </div>
+      <div class="pick-grid" id="pick-grid"></div>
+      <div class="pick-bar">
+        <span id="pick-count">0 of 8 picked</span>
+        <button class="btn ghost" id="pick-more">Show different ones</button>
+        <button class="btn solid" id="pick-done" disabled>Show my inspiration</button>
+      </div>
+    </section>
+
+    <section id="view-feed" class="view" hidden>
+      <div class="feed-head">
+        <div id="mode" class="mode"></div>
+        <button class="btn ghost small" id="retrain">Pick again</button>
+      </div>
+      <div class="masonry" id="feed"></div>
+      <div id="more" class="more">Loading more…</div>
+    </section>
+
+    <section id="view-saved" class="view" hidden>
+      <div class="intro">
+        <h1>Saved</h1>
+        <p id="saved-note">Everything you hearted. Each one also taught the model a little more about your taste.</p>
+      </div>
+      <div class="masonry" id="saved"></div>
+    </section>
+    <section id="view-mine" class="view" hidden>
+      <div class="intro">
+        <h1>My portfolio</h1>
+        <p>Add your own photos. The AI reads them right here in your browser and keeps them on this device, so nothing is uploaded. They join your feed, your searches, and the Uncharted map.</p>
+      </div>
+      <div class="drop" id="mine-drop">
+        <p>Drag photos here, or</p>
+        <div class="drop-btns">
+          <label class="btn solid" for="mine-files">Choose photos</label>
+          <label class="btn ghost" for="mine-folder">Choose a folder</label>
+        </div>
+        <input id="mine-files" type="file" accept="image/*" multiple class="sr">
+        <input id="mine-folder" type="file" webkitdirectory multiple class="sr">
+        <p id="mine-status" class="drop-status" aria-live="polite"></p>
+      </div>
+      <div class="feed-head">
+        <div class="mode"><b id="mine-count"></b> <span id="mine-note"></span></div>
+        <button class="btn ghost small" id="mine-clear" hidden>Remove from this device</button>
+      </div>
+      <div class="masonry" id="mine"></div>
+    </section>
+  </main>
+
+  <aside class="coach" id="coach" aria-label="Writer's block coach" hidden>
+    <div class="coach-head">
+      <div>
+        <div class="coach-title">CreateAI</div>
+        <div class="coach-sub">Writer's block coach, by [PARTNER NAME]</div>
+      </div>
+      <button class="icon" id="close-coach" aria-label="Close coach">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="chat" id="chat" aria-live="polite"></div>
+    <form class="chat-input" id="chat-form">
+      <label for="chat-text" class="sr">Message</label>
+      <textarea id="chat-text" rows="1" placeholder="Type here"></textarea>
+      <button class="btn solid" type="submit">Send</button>
+    </form>
+  </aside>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+
+  <footer class="foot">
+    Images and texts are public domain, from the Library of Congress, the Art Institute of Chicago, The Met and Project Gutenberg. The AI runs in your browser; nothing you add leaves your device.
+  </footer>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uncharted · Another Angle</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,400;1,500&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap">
+<style>
+/* Layout: night chart. A large map on the left is the protagonist; a narrow logbook on the right holds checkpoints. */
+:root {
+  --bg: #0B0A09; --surface: #141210; --line: #2A2622; --ink: #EFE8DC; --muted: #9A9085;
+  --accent: #E07B4C; --sea: #86AFC2; --fog: 225,221,214;
+  --display: 'Cormorant Garamond', 'Iowan Old Style', Georgia, serif;
+  --body: 'Instrument Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { background: var(--bg); color: var(--ink); }
+body { font-family: var(--body); font-size: 15px; line-height: 1.5; }
+.wrap { max-width: 1240px; margin: 0 auto; padding-block: 28px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+h1 { font-family: var(--display); font-weight: 500; font-size: clamp(34px, 5vw, 54px); line-height: 1; margin: 0; letter-spacing: -.01em; }
+h1 em { color: var(--accent); font-style: italic; }
+.tag { font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.lede { color: var(--muted); max-width: 60ch; margin: 8px 0 0; text-wrap: pretty; }
+
+.setup { display: grid; grid-template-columns: 1fr 1fr auto; gap: 14px; align-items: end; padding: 16px 0 18px; border-top: 1px solid var(--line); }
+.setup > div { min-width: 0; }
+.setup > div:first-child { grid-column: 1 / -1; }
+label.k { display: block; font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-bottom: 7px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font: 500 13px var(--body); color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 999px; padding: 5px 11px; cursor: pointer; }
+.chip:hover { border-color: var(--muted); }
+.chip[data-s="1"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.chip[data-s="-1"] { border-color: var(--sea); color: var(--muted); text-decoration: line-through; }
+input[type=text] { width: 100%; font: 15px var(--body); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 3px; padding: 9px 11px; }
+input[type=text]:focus, button:focus-visible, .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn { font: 600 14px var(--body); color: var(--bg); background: var(--ink); border: 0; border-radius: 3px; padding: 11px 18px; cursor: pointer; white-space: nowrap; }
+.btn:hover { background: var(--accent); }
+.btn:disabled { opacity: .45; cursor: default; background: var(--ink); }
+.hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+.stage { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px; align-items: start; }
+.mapbox { position: relative; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: var(--surface); }
+canvas#map { display: block; width: 100%; aspect-ratio: 16 / 10; max-width: 100%; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 10px 14px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+.status { position: absolute; left: 12px; top: 10px; font-family: var(--mono); font-size: 11px; letter-spacing: .06em; color: var(--ink); background: rgba(11,10,9,.72); padding: 5px 9px; border-radius: 3px; max-width: calc(100% - 24px); }
+
+.log { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 16px; }
+.card h2 { font-family: var(--display); font-weight: 500; font-size: 26px; line-height: 1.1; margin: 4px 0 6px; text-wrap: balance; }
+.card .setting { font-family: var(--mono); font-size: 12px; color: var(--accent); letter-spacing: .04em; }
+canvas.sketch { width: 100%; aspect-ratio: 4 / 3; display: block; border-radius: 2px; margin: 10px 0 4px; }
+.cap { font-size: 11px; color: var(--muted); }
+.frag { font-family: var(--display); font-style: italic; font-size: 20px; line-height: 1.35; margin: 12px 0 4px; }
+.imgline { font-size: 13px; color: var(--muted); margin: 6px 0 0; }
+.answers { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+.ans { font: 600 13px var(--body); color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 3px; padding: 10px 8px; cursor: pointer; }
+.ans:hover { border-color: var(--accent); color: var(--accent); }
+.ans kbd { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-left: 4px; }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.stat b { display: block; font-family: var(--display); font-size: 30px; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums; }
+.stat span { font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.trail { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.trail li { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+.trail li span:last-child { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
+.assign p { margin: 8px 0 0; }
+.assign b { color: var(--accent); font-weight: 600; }
+.thinking { color: var(--muted); font-style: italic; }
+.cpwide { margin-top: 18px; padding: 20px 22px; scroll-margin-top: 16px; }
+.cpgrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, .85fr); gap: 26px; align-items: start; margin-top: 10px; }
+.cpgrid > div { min-width: 0; }
+.cpgrid .col-h { font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.cpgrid .frag { margin-top: 4px; }
+.cpgrid .answers { margin-top: 0; }
+.cpgrid .ans { padding: 14px 8px; font-size: 14px; }
+.near { grid-template-columns: 1fr 1fr; }
+@media (max-width: 960px) { .cpgrid { grid-template-columns: 1fr; gap: 18px; } }
+.ans.stuck { grid-column: 1 / -1; color: var(--sea); border-style: dashed; }
+.vote { display: flex; gap: 6px; margin-top: 4px; }
+.v { flex: 1; font: 500 11px var(--body); color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 3px; padding: 4px 6px; cursor: pointer; }
+.v:hover:not(:disabled) { color: var(--ink); border-color: var(--muted); }
+.v[data-on="1"][data-g="1"] { color: var(--accent); border-color: var(--accent); }
+.v[data-on="1"][data-g="0"] { color: var(--sea); border-color: var(--sea); }
+.v:disabled:not([data-on="1"]) { opacity: .35; cursor: default; }
+.coach { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.near { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.near figure { margin: 0; min-width: 0; } .near img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 2px; display: block; }
+.near figcaption { font-size: 10px; color: var(--muted); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+details.how { margin-top: 26px; border-top: 1px solid var(--line); padding-top: 14px; color: var(--muted); }
+details.how summary { cursor: pointer; color: var(--ink); font-weight: 500; }
+details.how ol { max-width: 75ch; padding-left: 20px; }
+details.how li { margin: 6px 0; }
+@media (max-width: 960px) { .stage { grid-template-columns: 1fr; } .setup { grid-template-columns: 1fr 1fr; } .setup > div:first-child { grid-column: 1 / -1; } }
+@media (max-width: 520px) { .setup { grid-template-columns: 1fr; } .stats b { font-size: 24px; } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+<style>body { margin: 0; } .tag a { text-decoration: none; } .tag a:hover { color: var(--accent) !important; }</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="tag"><a href="index.html" style="color:inherit">Another Angle</a> · Uncharted</div>
+      <h1>Find the work <em>only you</em> would make.</h1>
+      <p class="lede">Every dot is a work that already exists. The fog is what the Compass doesn't know about you yet. It searches for the empty places your taste points to, and stops to ask you whenever it's unsure.</p>
+    </div>
+  </header>
+
+  <section class="setup" aria-label="Seed your map">
+    <div>
+      <label class="k">Themes you're drawn to <span style="text-transform:none;letter-spacing:0">(tap twice to mark "not me")</span></label>
+      <div class="chips" id="chips"></div>
+    </div>
+    <div>
+      <label class="k" for="mind">What's on your mind</label>
+      <input type="text" id="mind" value="my grandmother's house, leaving home">
+    </div>
+    <div>
+      <label class="k" for="here">Here and now</label>
+      <input type="text" id="here" value="Tempe, Arizona">
+      <div class="hint" id="nowtxt"></div>
+    </div>
+    <div><button class="btn" id="go">Chart my map</button></div>
+  </section>
+
+  <section class="stage">
+    <div class="mapbox">
+      <canvas id="map" aria-label="Taste map with fog, works, and planned routes"></canvas>
+      <div class="status" id="status">Example seed loaded. Press "Chart my map".</div>
+      <div class="legend">
+        <span><i style="background:var(--accent)"></i>routes being searched</span>
+        <span><i style="background:var(--ink)"></i>you, now</span>
+        <span><i style="background:rgba(225,221,214,.55)"></i>fog: the model is unsure</span>
+        <span><i style="background:#5c3a26"></i>warm ground: your taste</span>
+        <span><i style="background:var(--sea)"></i>uncharted spot (no work exists yet)</span>
+        <span>╌ earlier routes · × blocks you worked through</span>
+        <span id="kindlegend" hidden><i style="background:#E9DFCF"></i>photo <i style="background:#86AFC2;margin-left:10px"></i>passage <i style="background:#F2C14E;margin-left:10px"></i>your photos</span>
+      </div>
+    </div>
+
+    <aside class="log">
+      <div class="card stats">
+        <div class="stat"><b id="sQ">0</b><span>questions</span></div>
+        <div class="stat"><b id="sU">–</b><span>route fog</span></div>
+        <div class="stat"><b id="sR">0</b><span>reroutes</span></div>
+      </div>
+      <div class="card" id="trailcard" hidden>
+        <div class="tag">Your trail</div>
+        <ul class="trail" id="trail"></ul>
+      </div>
+    </aside>
+  </section>
+
+  <section class="card cpwide" id="cp" aria-live="polite">
+    <div class="tag">Checkpoint</div>
+    <h2>Nothing to ask yet</h2>
+    <p class="imgline">When a route runs into fog, the Compass stops, shows what already exists nearby and what could exist there, and asks how you feel about it. It will appear here, under the map.</p>
+  </section>
+
+  <details class="how">
+    <summary>How it learns (not if-then rules)</summary>
+    <ol>
+      <li><b>Taste with uncertainty.</b> A Bayesian logistic model spans the whole map. It keeps a best guess of what you like <i>and</i> how unsure it is everywhere. The fog you see is that uncertainty.</li>
+      <li><b>Uncharted spots.</b> It looks for places your taste rates highly (or might, if it's unsure) where few existing works sit. Those blank areas are the targets.</li>
+      <li><b>Route search.</b> A* plans a path from where you are now to each target. Walking through areas you dislike costs more, so two people get different routes.</li>
+      <li><b>Checkpoints only when they matter.</b> It stops at the foggiest point on the route, where your answer teaches it the most (active learning). Love, closer, no and weirder each update the model, and the routes replan live.</li>
+      <li><b>Arrival.</b> When the fog along the route clears, it has found a place and time that never existed, built from your blend of themes. That becomes your assignment, for a photo or for writing.</li>
+    </ol>
+    <p>Everything here runs in your browser. The map is built from CLIP embeddings of every photo and passage in the archive, and it starts from the picks and hearts you made in Another Angle. Your votes here train the same taste model, so your feed gets better too.</p>
+  </details>
+</div>
+
+
+<script type="module" src="js/uncharted.js"></script>
+</body>
+</html>
