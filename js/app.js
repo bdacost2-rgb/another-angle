@@ -3,6 +3,7 @@ import { TasteModel } from "./taste.js";
 import { Coach } from "./coach.js";
 import * as models from "./models.js";
 import { addPhotos, loadPhotos, asItems, mergeInto, clearPhotos } from "./mine.js";
+import { initLens, setWords } from "./lens.js";
 
 const $ = (s) => document.querySelector(s);
 const ICON = {
@@ -39,7 +40,15 @@ function toast(text, ms = 2600) {
 }
 
 function show(view) {
-  for (const v of ["start", "feed", "saved", "mine"]) $(`#view-${v}`).hidden = v !== view;
+  for (const v of ["start", "feed", "saved", "mine", "coach"]) $(`#view-${v}`).hidden = v !== view;
+  // Tabs: the coach is its own tab; everything else belongs to Inspiration.
+  const onCoach = view === "coach";
+  for (const [id, on] of [["#tab-coach", onCoach], ["#tab-feed", !onCoach]]) {
+    if (on) $(id).setAttribute("aria-current", "page"); else $(id).removeAttribute("aria-current");
+  }
+  $("#tools").hidden = onCoach;
+  const want = onCoach ? "#coach" : "";
+  if (location.hash !== want) history.replaceState(null, "", location.pathname + location.search + want);
   window.scrollTo(0, 0);
 }
 
@@ -51,7 +60,7 @@ function credit(item) {
 }
 
 function passage(item, lead = false) {
-  return el("div", { class: "passage" + (lead ? " lead" : "") }, el("p", {}, item.text));
+  return el("div", { class: "passage" + (lead ? " lead" : "") }, setWords(el("p", {}), item.text));
 }
 
 // ---------- Onboarding: pick what moves you ----------
@@ -70,7 +79,7 @@ function renderPicks() {
       b.setAttribute("aria-pressed", String(b.getAttribute("aria-pressed") !== "true"));
       updatePickCount();
     } },
-    it.kind === "photo" ? el("img", { src: it.img, alt: it.title || "Archive photo", loading: "lazy" }) : el("span", { class: "txt" }, it.text));
+    it.kind === "photo" ? el("img", { src: it.img, alt: it.title || "Archive photo", loading: "lazy" }) : setWords(el("span", { class: "txt" }), it.text));
     b.dataset.id = it.id;
     grid.append(b);
   }
@@ -289,11 +298,12 @@ function renderMine() {
 
 // ---------- Coach ----------
 function openCoach() {
-  $("#coach").hidden = false;
+  show("coach");
   if (!coach) {
     coach = new Coach({
       embed: (list) => models.sentences(list),
       inspiration: () => {
+        if (!T) return null; // the coach also works on its own, before the archive has loaded
         const lead = T.pick(1, { kind: "photo", exclude: shown })[0];
         return lead ? { item: lead, partner: T.partnerFor(lead) } : null;
       },
@@ -301,7 +311,7 @@ function openCoach() {
     });
     coach.start();
   }
-  setTimeout(() => $("#chat-text").focus(), 50);
+  setTimeout(() => $("#chat-text").focus({ preventScroll: true }), 50);
 }
 
 let pending = null;
@@ -339,11 +349,30 @@ function renderMsg(m) {
 
 // ---------- Start ----------
 async function main() {
+  initLens();
+  // The writing coach doesn't need the archive, so its tab is wired up first and works either way.
+  $("#tab-coach").addEventListener("click", (e) => { e.preventDefault(); openCoach(); });
+  window.addEventListener("hashchange", () => { if (location.hash === "#coach") openCoach(); });
+  $("#chat-form").onsubmit = (e) => {
+    e.preventDefault();
+    const ta = $("#chat-text");
+    const v = ta.value.trim();
+    if (!v || !coach) return;
+    ta.value = "";
+    coach.reply(v);
+  };
+  $("#chat-text").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#chat-form").requestSubmit(); }
+  });
+  if (location.hash === "#coach") openCoach();
+
   try {
     A = await loadArchive();
   } catch (e) {
     console.error(e);
-    $("main").replaceChildren(el("p", { class: "empty" }, "The archive data is missing. Run tools/build_data.py (see README) to create data/items.json and data/emb.bin."));
+    $("#view-start").replaceChildren(el("p", { class: "empty" }, "The archive data is missing. Run tools/build_data.py (see README) to create data/items.json and data/emb.bin."));
+    document.querySelectorAll('[data-go="feed"]').forEach((a) => a.addEventListener("click", (ev) => { ev.preventDefault(); show("start"); }));
+    if (location.hash !== "#coach") show("start");
     return;
   }
   await mergeInto(A); // your portfolio, if you've added one
@@ -374,27 +403,14 @@ async function main() {
   drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
   drop.addEventListener("dragleave", () => drop.classList.remove("over"));
   drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); importMine(e.dataTransfer.files); });
-  $("#open-coach").onclick = openCoach;
-  $("#close-coach").onclick = () => ($("#coach").hidden = true);
-  $("#chat-form").onsubmit = (e) => {
-    e.preventDefault();
-    const ta = $("#chat-text");
-    const v = ta.value.trim();
-    if (!v || !coach) return;
-    ta.value = "";
-    coach.reply(v);
-  };
-  $("#chat-text").addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#chat-form").requestSubmit(); }
-  });
 
   new IntersectionObserver((es) => {
     if (es.some((x) => x.isIntersecting) && !$("#view-feed").hidden) loadMore();
   }, { rootMargin: "600px" }).observe($("#more"));
 
-  if (T.count >= PICKS_NEEDED) { show("feed"); resetFeed(); }
+  if (location.hash === "#coach") { if (T.count < PICKS_NEEDED) renderPicks(); }
+  else if (T.count >= PICKS_NEEDED) { show("feed"); resetFeed(); }
   else { renderPicks(); show("start"); }
-  if (location.hash === "#coach") openCoach();
 }
 
 main();

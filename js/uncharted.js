@@ -89,7 +89,7 @@ async function main() {
     }
     window.COMPASS_DATA = {
       themes, train, trained: T.count, journey: null,
-      works: items.map((it) => ({ x: it.x, y: it.y, kind: it.kind === "photo" ? 0 : 1, id: it.index, mine: !!it.mine })),
+      works: items.map((it) => ({ x: it.x, y: it.y, kind: it.kind === "photo" ? 0 : 1, id: it.index, mine: !!it.mine, title: (it.title || "").slice(0, 60) })),
       mine: mine.length,
     };
 

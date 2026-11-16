@@ -132,84 +132,148 @@ function astar(s, g){
   return {order, path, total:gS[g]};
 }
 
-// ---------- drawing ----------
+// ---------- drawing: the map as a 3-D terrain ----------
+// The same 64 x 40 model grid, lifted into space. Height and warmth are your taste (hills where the
+// model thinks you'd love it), and fog floats over whatever it is still unsure about. Drag to turn it,
+// move the cursor to clear the fog nearby, click to send a signal across it.
 const cv=document.getElementById('map'), ctx=cv.getContext('2d');
-const off=document.createElement('canvas'); off.width=W; off.height=H; const octx=off.getContext('2d');
 let CW=0, CH=0;
-function resize(){ const r=cv.getBoundingClientRect(), dpr=Math.min(2,window.devicePixelRatio||1); CW=r.width; CH=r.width*10/16; cv.width=CW*dpr; cv.height=CH*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); draw(); }
-const px=(i)=> (i+.5)/W*CW, py=(j)=> (j+.5)/H*CH;
+function resize(){ const r=cv.getBoundingClientRect(), dpr=Math.min(2,window.devicePixelRatio||1); CW=r.width; CH=r.height; cv.width=CW*dpr; cv.height=CH*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); draw(); }
 let anim = {searches:[], t:0, paths:[], cp:null, start:null, tg:[], arrived:false};
-let fieldCache=null, fieldDirty=true;
-const NOISE=(()=>{ const c=document.createElement('canvas'); c.width=320; c.height=200; const g=c.getContext('2d'); const r=mulberry(99);
-  // value noise, three octaves
-  const grid=(n)=>{ const a=[]; for(let k=0;k<(n+1)*(n+1);k++) a.push(r()); return a; };
-  const oct=[[6,.5],[14,.3],[34,.2]].map(([n,w])=>({n,w,g:grid(n)}));
-  const img=g.createImageData(320,200);
-  for(let y=0;y<200;y++) for(let x=0;x<320;x++){ let v=0; for(const o of oct){ const fx=x/320*o.n, fy=y/200*o.n, ix=fx|0, iy=fy|0, tx=fx-ix, ty=fy-iy, sm=t=>t*t*(3-2*t);
-      const G=(i,j)=>o.g[j*(o.n+1)+i]; const a=G(ix,iy)+(G(ix+1,iy)-G(ix,iy))*sm(tx), b=G(ix,iy+1)+(G(ix+1,iy+1)-G(ix,iy+1))*sm(tx); v+=o.w*(a+(b-a)*sm(ty)); }
-    const k=(y*320+x)*4; img.data[k]=img.data[k+1]=img.data[k+2]=255; img.data[k+3]=Math.min(255, 60+v*230); }
-  g.putImageData(img,0,0); return c; })();
-function buildField(){
-  fieldCache = fieldCache || document.createElement('canvas'); fieldCache.width=Math.max(1,CW|0); fieldCache.height=Math.max(1,CH|0);
-  const f=fieldCache.getContext('2d');
-  // ground: dark, warming where the model is confident you like it
-  const img=octx.createImageData(W,H);
-  for (let c=0;c<W*H;c++){ const like=sig(MU[c]), fog=Math.min(1,SD[c]/SD0), heat=Math.max(0,like-.45)/.55*(1-.7*fog);
-    const k=c*4; img.data[k]=20+105*heat; img.data[k+1]=18+52*heat; img.data[k+2]=16+22*heat; img.data[k+3]=255; }
-  octx.putImageData(img,0,0); f.imageSmoothingEnabled=true; f.imageSmoothingQuality='high'; f.drawImage(off,0,0,CW,CH);
-  // fog: whitish, textured, thick where the model is unsure
-  const t=document.createElement('canvas'); t.width=CW|0; t.height=CH|0; const tg=t.getContext('2d');
-  const fimg=octx.createImageData(W,H);
-  for (let c=0;c<W*H;c++){ const fog=Math.min(1,SD[c]/SD0); const k=c*4; fimg.data[k]=225; fimg.data[k+1]=221; fimg.data[k+2]=214; fimg.data[k+3]=255*Math.pow(Math.max(0,fog-.25)/.75,1.4)*.55; }
-  octx.putImageData(fimg,0,0); tg.imageSmoothingEnabled=true; tg.imageSmoothingQuality='high'; tg.drawImage(off,0,0,CW,CH);
-  tg.globalCompositeOperation='destination-in'; tg.drawImage(NOISE,0,0,CW,CH);
-  f.drawImage(t,0,0); fieldDirty=false;
-}
-function drawField(){ if (fieldDirty || !fieldCache || fieldCache.width!==(CW|0)) buildField(); ctx.drawImage(fieldCache,0,0,CW,CH); }
+let fieldDirty=true;
+const REDUCE = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const N=W*H, ASPECT=W/H;
+// terrain: targets follow the model; the drawn values ease toward them, so the land visibly reshapes when you answer
+const HTt=new Float32Array(N), FGt=new Float32Array(N), HEt=new Float32Array(N);
+const HT=new Float32Array(N), FG=new Float32Array(N).fill(1), HE=new Float32Array(N);
+const PX=new Float32Array(N), PY=new Float32Array(N), PK=new Float32Array(N), LIT=new Float32Array(N), VH=new Float32Array(N);
+function terrainTargets(){ for (let c=0;c<N;c++){ const like=sig(MU[c]), fog=Math.min(1,SD[c]/SD0);
+    HTt[c]=(like-.5)*.34*(1-.45*fog); FGt[c]=fog; HEt[c]=Math.max(0,like-.45)/.55*(1-.7*fog); } fieldDirty=false; }
+const HOME={yaw:-.42, tilt:.98};
+const cam={yaw:HOME.yaw, tilt:HOME.tilt, vyaw:0, cy:1, sy:0, ct:1, st:0, S:1};
+function project(u,v,h){ const X=(u-.5)*ASPECT, Z=v-.5, x=X*cam.cy-Z*cam.sy, z=X*cam.sy+Z*cam.cy;
+  const y=z*cam.ct-h*cam.st, depth=z*cam.st+h*cam.ct, k=1/(1-depth*.42);
+  return [CW/2+x*k*cam.S, CH*.5+y*k*cam.S, k]; }
+function hAt(u,v){ const fx=Math.min(W-1,Math.max(0,u*W-.5)), fy=Math.min(H-1,Math.max(0,v*H-.5)), i=Math.min(W-2,fx|0), j=Math.min(H-2,fy|0), a=fx-i, b=fy-j, c=j*W+i;
+  return (VH[c]*(1-a)+VH[c+1]*a)*(1-b)+(VH[c+W]*(1-a)+VH[c+W+1]*a)*b; }
+const cellUV = c => [(c%W+.5)/W, (((c/W)|0)+.5)/H];
+const onLand = (u,v,lift=0) => project(u,v,hAt(u,v)+lift);
+const PUFF=(()=>{ const c=document.createElement('canvas'); c.width=c.height=48; const g=c.getContext('2d'), r=g.createRadialGradient(24,24,0,24,24,24);
+  r.addColorStop(0,'rgba(228,228,234,.85)'); r.addColorStop(.45,'rgba(228,228,234,.32)'); r.addColorStop(1,'rgba(228,228,234,0)'); g.fillStyle=r; g.fillRect(0,0,48,48); return c; })();
+
+// ---------- pointer: turn the map, carry a light over it, send signals ----------
+const ptr={x:0,y:0,lx:0,ly:0,on:false,a:0,down:false,drag:false,sx:0,sy:0,pick:-1}; let ripples=[];
+WORKS.forEach((w,i)=>{ w.ph=(i*2.399)%6.283; w.ox=0; w.oy=0; });
+function ptrPos(e){ const r=cv.getBoundingClientRect(); ptr.x=e.clientX-r.left; ptr.y=e.clientY-r.top; if(!ptr.on){ ptr.lx=ptr.x; ptr.ly=ptr.y; } ptr.on=true; }
+cv.addEventListener('pointerdown', e=>{ ptrPos(e); ptr.down=true; ptr.drag=false; ptr.sx=e.clientX; ptr.sy=e.clientY; try{ cv.setPointerCapture(e.pointerId); }catch(_){} });
+cv.addEventListener('pointermove', e=>{ const dx=e.clientX-ptr.sx, dy=e.clientY-ptr.sy; ptrPos(e);
+  if (ptr.down){ if (!ptr.drag && Math.hypot(dx,dy)>4) ptr.drag=true;
+    if (ptr.drag){ cam.yaw+=dx*.006; cam.vyaw=dx*.006; cam.tilt=Math.min(1.3,Math.max(.12,cam.tilt+dy*.004)); ptr.sx=e.clientX; ptr.sy=e.clientY; cv.classList.add('turning'); } } });
+function ptrUp(e){ if (ptr.down && !ptr.drag && ptr.pick>=0){ const [u,v]=cellUV(ptr.pick); ripples.push({u,v,t:performance.now()}); if (ripples.length>6) ripples.shift(); }
+  ptr.down=false; ptr.drag=false; cv.classList.remove('turning'); if (e.pointerType==='touch') ptr.on=false; }
+cv.addEventListener('pointerup', ptrUp); cv.addEventListener('pointercancel', ptrUp);
+cv.addEventListener('pointerleave', ()=>{ if (!ptr.down) ptr.on=false; });
+cv.addEventListener('dblclick', ()=>{ cam.yaw=HOME.yaw; cam.tilt=HOME.tilt; cam.vyaw=0; });
+const SANS="'Google Sans Flex', 'Helvetica Neue', Arial, sans-serif";
+
 function draw(){
-  if (!CW) return;
-  ctx.clearRect(0,0,CW,CH); drawField();
-  // graticule
-  ctx.strokeStyle='rgba(239,232,220,.05)'; ctx.lineWidth=1;
-  for(let a=1;a<8;a++){ ctx.beginPath(); ctx.moveTo(a*CW/8,0); ctx.lineTo(a*CW/8,CH); ctx.stroke(); }
-  for(let a=1;a<5;a++){ ctx.beginPath(); ctx.moveTo(0,a*CH/5); ctx.lineTo(CW,a*CH/5); ctx.stroke(); }
+  if (!CW || !CH) return;
+  const now=performance.now();
+  if (fieldDirty) terrainTargets();
+  // camera: glide after a drag, and drift very slowly when nobody is touching it
+  if (!ptr.down){ cam.yaw+=cam.vyaw; cam.vyaw*=.93; if (!ptr.on && !REDUCE) cam.yaw+=.0007; }
+  cam.cy=Math.cos(cam.yaw); cam.sy=Math.sin(cam.yaw); cam.ct=Math.cos(cam.tilt); cam.st=Math.sin(cam.tilt); cam.S=Math.min(CW*.5, CH*.92);
+  ctx.clearRect(0,0,CW,CH);
+  const bg=ctx.createRadialGradient(CW/2,CH*.5,0,CW/2,CH*.5,Math.max(CW,CH)*.65); bg.addColorStop(0,'#1b1b1f'); bg.addColorStop(1,'#121214'); ctx.fillStyle=bg; ctx.fillRect(0,0,CW,CH);
+  ripples=ripples.filter(rp=>now-rp.t<2600);
+  ptr.a+=((ptr.on?1:0)-ptr.a)*.08; ptr.lx+=(ptr.x-ptr.lx)*(REDUCE?1:.2); ptr.ly+=(ptr.y-ptr.ly)*(REDUCE?1:.2);
+  const R=Math.max(90, Math.min(CW,CH)*.2), ease=REDUCE?1:.07;
+  // vertices: ease toward the model, add ripples, project, and find the one under the cursor
+  let pick=-1, pd=1e9;
+  for (let c=0;c<N;c++){
+    HT[c]+=(HTt[c]-HT[c])*ease; FG[c]+=(FGt[c]-FG[c])*ease; HE[c]+=(HEt[c]-HE[c])*ease;
+    const u=(c%W+.5)/W, v=(((c/W)|0)+.5)/H; let h=HT[c];
+    for (const rp of ripples){ const age=now-rp.t, d=Math.hypot((u-rp.u)*ASPECT, v-rp.v), k=1-Math.abs(d-age*.00055)/.06; if (k>0) h+=k*(1-age/2600)*.05; }
+    VH[c]=h; const p=project(u,v,h); PX[c]=p[0]; PY[c]=p[1]; PK[c]=p[2];
+    const d=Math.hypot(p[0]-ptr.lx, p[1]-ptr.ly); LIT[c]=d<R ? (1-d/R)*ptr.a : 0; if (d<pd){ pd=d; pick=c; }
+  }
+  ptr.pick = ptr.a>.01 && pd<60 ? pick : -1;
+  // the land: a fine mesh, warm and bright where your taste is
+  ctx.lineWidth=1; ctx.strokeStyle='rgba(244,244,244,.055)'; ctx.beginPath();
+  for (let j=0;j<H;j+=2){ ctx.moveTo(PX[j*W],PY[j*W]); for (let i=1;i<W;i++) ctx.lineTo(PX[j*W+i],PY[j*W+i]); }
+  for (let i=0;i<W;i+=2){ ctx.moveTo(PX[i],PY[i]); for (let j=1;j<H;j++) ctx.lineTo(PX[j*W+i],PY[j*W+i]); }
+  ctx.stroke();
+  for (let c=0;c<N;c++){ const he=HE[c], l=LIT[c], s=(1.1+he*1.6+l*1.2)*PK[c];
+    ctx.fillStyle=`rgba(${150+105*he|0},${150+48*he|0},${165-70*he|0},${Math.min(1,.2+he*.7+l*.5)})`; ctx.fillRect(PX[c]-s/2,PY[c]-s/2,s,s); }
   // works
-  for (const w of WORKS){ ctx.fillStyle = DATA ? (w.mine ? '#F2C14E' : w.kind ? '#86AFC2' : '#E9DFCF') : THEMES[w.ti].pal[2]; ctx.globalAlpha=w.mine?.95:.75; ctx.beginPath(); ctx.arc(w.x*CW,w.y*CH,w.mine?3:1.8,0,7); ctx.fill(); }
+  let near=null, nd=1e9; const links=[];
+  for (const w of WORKS){ const p=onLand(w.x,w.y,.012); let x=p[0], y=p[1], boost=0, tx=0, ty=0;
+    if (!REDUCE){ x+=Math.cos(now/1700+w.ph)*.7; y+=Math.sin(now/2100+w.ph*1.7)*.7; }
+    if (ptr.a>.01){ const dx=x-ptr.lx, dy=y-ptr.ly, d=Math.hypot(dx,dy);
+      if (d<R){ const k=1-d/R; boost=k*ptr.a; const q=k*k*10*ptr.a/(d||1); tx=dx*q; ty=dy*q; if (d<nd){ nd=d; near=w; } if (d<R*.6) links.push([w,d]); } }
+    if (REDUCE){ tx=0; ty=0; }
+    w.ox+=(tx-w.ox)*.2; w.oy+=(ty-w.oy)*.2; x+=w.ox; y+=w.oy; w.sx=x; w.sy=y;
+    ctx.fillStyle = DATA ? (w.mine ? '#F2C14E' : w.kind ? '#b7cbf2' : '#f4f4f4') : THEMES[w.ti].pal[2];
+    ctx.globalAlpha=Math.min(1,(w.mine?.95:.72)+boost*.4); ctx.beginPath(); ctx.arc(x,y,(w.mine?2.8:1.7)*p[2]*(1+boost*1.3),0,7); ctx.fill(); }
   ctx.globalAlpha=1;
-  // theme labels
-  ctx.textAlign='center'; const fs=Math.max(11,CW/62);
-  ctx.font=`italic 500 ${fs}px 'Cormorant Garamond', Georgia, serif`;
-  THEMES.forEach(t=>{ ctx.fillStyle = state[t.n]===1?'#EFE8DC': state[t.n]===-1?'rgba(134,175,194,.7)':'rgba(239,232,220,.55)'; ctx.fillText(t.n, t.x*CW, t.y*CH - fs*.9); });
+  // fog: soft puffs floating over what the model is unsure about; the cursor's light burns it off
+  for (let c=0;c<N;c++){ const f=Math.max(0,FG[c]-.25)/.75; if (f<=.02) continue; const a=Math.pow(f,1.4)*.2*(1-LIT[c])*(1-LIT[c]); if (a<.006) continue;
+    const s=cam.S/W*3.4*PK[c], lift=.05*cam.S*PK[c]*cam.st; ctx.globalAlpha=a; ctx.drawImage(PUFF,PX[c]-s/2,PY[c]-lift-s/2,s,s); }
+  ctx.globalAlpha=1;
+  if (ptr.a>.01){ const lg=ctx.createRadialGradient(ptr.lx,ptr.ly,0,ptr.lx,ptr.ly,R); lg.addColorStop(0,`rgba(255,229,207,${.13*ptr.a})`); lg.addColorStop(1,'rgba(255,229,207,0)');
+    ctx.globalCompositeOperation='lighter'; ctx.fillStyle=lg; ctx.fillRect(ptr.lx-R,ptr.ly-R,2*R,2*R); ctx.globalCompositeOperation='source-over'; }
+  // threads from the light to the works closest to it
+  if (ptr.a>.01){ links.sort((a,b)=>a[1]-b[1]); ctx.lineWidth=.7;
+    for (const [w,d] of links.slice(0,8)){ ctx.strokeStyle=`rgba(244,244,244,${.3*(1-d/(R*.6))*ptr.a})`; ctx.beginPath(); ctx.moveTo(ptr.lx,ptr.ly); ctx.lineTo(w.sx,w.sy); ctx.stroke(); } }
+  // signals: rings that travel over the land
+  for (const rp of ripples){ const age=now-rp.t, rr=age*.00055; ctx.strokeStyle=`rgba(183,203,242,${.6*(1-age/2600)})`; ctx.lineWidth=1.2; ctx.beginPath();
+    let pen=false; for (let k=0;k<=56;k++){ const a=k/56*6.2832, u=rp.u+Math.cos(a)*rr/ASPECT, v=rp.v+Math.sin(a)*rr; if (u<0||u>1||v<0||v>1){ pen=false; continue; }
+      const p=onLand(u,v,.004); pen?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]); pen=true; }
+    ctx.stroke(); }
+  // theme names stand on thin stems above the land
+  ctx.textAlign='center'; const fs=Math.max(10,Math.min(13,CW/92));
+  ctx.font=`500 ${fs}px ${SANS}`;
+  // (the ones you chose first; a name that would sit on top of another is left out until you turn the map)
+  const placed=[];
+  [...THEMES].sort((a,b)=>(state[b.n]===1)-(state[a.n]===1)).forEach(t=>{ const g=onLand(t.x,t.y,0), p=onLand(t.x,t.y,.1), tw=ctx.measureText(t.n).width/2+6;
+    if (placed.some(q=>Math.abs(q[0]-p[0])<q[2]+tw && Math.abs(q[1]-p[1])<fs+5)) return; placed.push([p[0],p[1],tw]);
+    ctx.strokeStyle='rgba(244,244,244,.18)'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(g[0],g[1]); ctx.lineTo(p[0],p[1]); ctx.stroke();
+    ctx.fillStyle = state[t.n]===1?'#f4f4f4': state[t.n]===-1?'rgba(183,203,242,.6)':'rgba(244,244,244,.5)'; ctx.fillText(t.n, p[0], p[1]-5); });
   // your earlier routes and the blocks you worked through
-  ctx.setLineDash([2,4]); ctx.lineWidth=1.2; ctx.strokeStyle='rgba(134,175,194,.55)';
-  journey.paths.forEach(pth=>{ ctx.beginPath(); pth.forEach(([x,y],k)=> k?ctx.lineTo(x*CW,y*CH):ctx.moveTo(x*CW,y*CH)); ctx.stroke(); });
+  ctx.setLineDash([2,4]); ctx.lineWidth=1.2; ctx.strokeStyle='rgba(183,203,242,.5)';
+  journey.paths.forEach(pth=>{ ctx.beginPath(); pth.forEach(([x,y],k)=>{ const p=onLand(x,y,.006); k?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]); }); ctx.stroke(); });
   ctx.setLineDash([]);
-  journey.blocks.forEach(b=>{ const x=b.x*CW, y=b.y*CH; ctx.strokeStyle = b.helped ? '#86AFC2' : '#9A9085'; ctx.lineWidth=1.6;
+  journey.blocks.forEach(b=>{ const [x,y]=onLand(b.x,b.y,.01); ctx.strokeStyle = b.helped ? '#b7cbf2' : '#9a9a9d'; ctx.lineWidth=1.6;
     ctx.beginPath(); ctx.moveTo(x-4,y-4); ctx.lineTo(x+4,y+4); ctx.moveTo(x+4,y-4); ctx.lineTo(x-4,y+4); ctx.stroke();
-    ctx.fillStyle='rgba(239,232,220,.7)'; ctx.font=`500 ${Math.max(9,CW/95)}px 'Instrument Sans', sans-serif`; ctx.fillText(b.block, x, y-8); });
+    ctx.fillStyle='rgba(244,244,244,.7)'; ctx.font=`500 ${Math.max(9,fs-2)}px ${SANS}`; ctx.fillText(b.block, x, y-8); });
   // explored frontier
-  const rr = CW/W*.32;
   anim.searches.forEach((s)=>{ const n=Math.min(s.order.length, Math.floor(anim.t*s.speed)); const after=Math.max(0, anim.t*s.speed - s.order.length);
     const fade = Math.max(.25, 1 - after/(s.path.length*2+1));
-    for (let k=0;k<n;k++){ const c=s.order[k], age=(n-k)/Math.max(1,n), a=(k>n-40? .75 : Math.max(.10,.35-age*.3))*fade;
-      ctx.fillStyle=`rgba(224,123,76,${a})`; ctx.beginPath(); ctx.arc(px(c%W), py((c/W)|0), k>n-40? rr*1.3 : rr, 0, 7); ctx.fill(); } });
+    for (let k=0;k<n;k++){ const c=s.order[k], age=(n-k)/Math.max(1,n), a=(k>n-40? .8 : Math.max(.10,.35-age*.3))*fade, rr=cam.S/W*.3*PK[c]*(k>n-40?1.4:1);
+      ctx.fillStyle=`rgba(224,123,76,${a})`; ctx.beginPath(); ctx.arc(PX[c], PY[c], rr, 0, 7); ctx.fill(); } });
   // paths
   anim.searches.forEach((s,si)=>{ const done = anim.t*s.speed >= s.order.length; if(!done) return;
     const prog = Math.min(1, (anim.t*s.speed - s.order.length)/ (s.path.length*1.4));
     const m = Math.max(2, Math.floor(s.path.length*prog));
     ctx.strokeStyle = si===anim.best ? '#E07B4C' : 'rgba(224,123,76,.45)'; ctx.lineWidth = si===anim.best?3:1.6; ctx.setLineDash(si===anim.best?[]:[5,5]);
-    ctx.beginPath(); s.path.slice(0,m).forEach((c,k)=>{ const x=px(c%W), y=py((c/W)|0); k?ctx.lineTo(x,y):ctx.moveTo(x,y); }); ctx.stroke(); ctx.setLineDash([]); });
-  // targets
-  anim.tg.forEach((t,ti)=>{ const x=px(t.i), y=py(t.j), pulse = 6+2*Math.sin(performance.now()/300+ti);
-    ctx.strokeStyle='#86AFC2'; ctx.lineWidth=1.5; ctx.beginPath(); ctx.arc(x,y,pulse+4,0,7); ctx.stroke();
-    ctx.fillStyle='#86AFC2'; ctx.beginPath(); ctx.arc(x,y,3.2,0,7); ctx.fill(); });
-  // start
-  if (anim.start!=null){ const x=px(anim.start%W), y=py((anim.start/W)|0); ctx.fillStyle='#EFE8DC'; ctx.beginPath(); ctx.arc(x,y,5.5,0,7); ctx.fill();
-    ctx.font=`500 ${Math.max(10,CW/80)}px 'Instrument Sans', sans-serif`; ctx.fillText('you', x, y+16); }
-  // checkpoint
-  if (anim.cp!=null){ const x=px(anim.cp%W), y=py((anim.cp/W)|0), p=8+3*Math.sin(performance.now()/180);
-    ctx.strokeStyle='#EFE8DC'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(x-p,y); ctx.lineTo(x+p,y); ctx.moveTo(x,y-p); ctx.lineTo(x,y+p); ctx.stroke();
-    ctx.beginPath(); ctx.arc(x,y,p*.7,0,7); ctx.stroke(); }
+    ctx.beginPath(); s.path.slice(0,m).forEach((c,k)=>{ k?ctx.lineTo(PX[c],PY[c]):ctx.moveTo(PX[c],PY[c]); }); ctx.stroke(); ctx.setLineDash([]); });
+  // beacons: a column of light over each uncharted target, over you, and over the checkpoint
+  const beacon=(c,col,hgt)=>{ const [u,v]=cellUV(c), top=project(u,v,VH[c]+hgt), g=ctx.createLinearGradient(PX[c],PY[c],top[0],top[1]); g.addColorStop(0,col); g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.strokeStyle=g; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(PX[c],PY[c]); ctx.lineTo(top[0],top[1]); ctx.stroke(); };
+  anim.tg.forEach((t,ti)=>{ const c=t.c!=null?t.c:t.j*W+t.i, x=PX[c], y=PY[c], pulse = 6+2*Math.sin(now/300+ti); beacon(c,'rgba(183,203,242,.9)',.2);
+    ctx.strokeStyle='#b7cbf2'; ctx.lineWidth=1.5; ctx.beginPath(); ctx.ellipse(x,y,pulse+4,(pulse+4)*Math.max(.25,cam.ct),0,0,7); ctx.stroke();
+    ctx.fillStyle='#b7cbf2'; ctx.beginPath(); ctx.arc(x,y,3.2,0,7); ctx.fill(); });
+  if (anim.start!=null){ const c=anim.start, x=PX[c], y=PY[c]; beacon(c,'rgba(244,244,244,.9)',.14); ctx.fillStyle='#f4f4f4'; ctx.beginPath(); ctx.arc(x,y,5,0,7); ctx.fill();
+    ctx.font=`500 ${fs}px ${SANS}`; ctx.fillText('you', x, y+17); }
+  if (anim.cp!=null){ const c=anim.cp, x=PX[c], y=PY[c], p=8+3*Math.sin(now/180); beacon(c,'rgba(255,229,207,1)',.3);
+    ctx.strokeStyle='#ffe5cf'; ctx.lineWidth=2; ctx.beginPath(); ctx.ellipse(x,y,p*1.4,p*1.4*Math.max(.25,cam.ct),0,0,7); ctx.stroke(); ctx.fillStyle='#ffe5cf'; ctx.beginPath(); ctx.arc(x,y,3.5,0,7); ctx.fill(); }
+  // the cursor itself, and the name of the work it is closest to
+  if (ptr.a>.01 && !ptr.drag){ ctx.strokeStyle=`rgba(244,244,244,${.85*ptr.a})`; ctx.lineWidth=1; ctx.beginPath(); ctx.arc(ptr.x,ptr.y,5,0,7); ctx.stroke();
+    if (near && nd<18){ const what = DATA ? (near.mine?'your photo':near.kind?'passage':'photo') : THEMES[near.ti].n, label = near.title ? `${what} · ${near.title}` : what;
+      ctx.beginPath(); ctx.arc(near.sx,near.sy,7,0,7); ctx.stroke();
+      ctx.font=`500 11px ${SANS}`; ctx.textAlign='left';
+      const tw=ctx.measureText(label).width, lx=Math.min(near.sx+14, CW-tw-14), ly=Math.max(22, near.sy-12);
+      ctx.fillStyle=`rgba(18,18,20,${.82*ptr.a})`; ctx.fillRect(lx-6,ly-13,tw+12,19); ctx.fillStyle=`rgba(244,244,244,${ptr.a})`; ctx.fillText(label,lx,ly); ctx.textAlign='center'; } }
 }
 
 // ---------- blending: what lives at a point ----------
@@ -289,6 +353,14 @@ async function words(bl, setting, history){
 // ---------- the loop ----------
 const $=id=>document.getElementById(id);
 let history=[], reroutes=0, current=null, busy=false;
+// ---------- sections: seed, map, checkpoint, logbook. One on screen at a time; the rail switches. ----------
+const PANES=['seed','map','checkpoint','logbook']; let pane='seed', paneTimer=0;
+function go(name){ clearTimeout(paneTimer); pane=name;
+  PANES.forEach(n=>{ $('pane-'+n).hidden = n!==name; const b=document.querySelector(`.rail [data-pane="${n}"]`); if (n===name){ b.setAttribute('aria-current','true'); b.removeAttribute('data-new'); } else b.removeAttribute('aria-current'); });
+  if (name==='map') requestAnimationFrame(resize); window.scrollTo(0,0); }
+function flag(name){ if (pane!==name) document.querySelector(`.rail [data-pane="${name}"]`).setAttribute('data-new','1'); }
+document.querySelectorAll('.rail [data-pane]').forEach(b=>b.onclick=()=>go(b.dataset.pane));
+document.addEventListener('click', e=>{ const a=e.target.closest('[data-go-pane]'); if (a){ e.preventDefault(); go(a.dataset.goPane); } });
 // ---------- your saved identity: answers, routes and blocks carry across sessions ----------
 const BLANK = {obs:[], trail:[], paths:[], blocks:[], sessions:0};
 let journey = (DATA && DATA.journey) || (()=>{ try { return JSON.parse(localStorage.getItem('compass-journey')); } catch(e) { return null; } })() || BLANK;
@@ -356,7 +428,7 @@ async function nearest(cell){
   lastPhotos = (r && r.photos) || [];
   if (!r) return '';
   return `<div class="near">${(r.photos||[]).map(p=>`<figure><img src="${p.src}" alt=""><figcaption>${esc(p.credit)}</figcaption>${voteBtns(0, p.id)}</figure>`).join('')}</div>
-    ${(r.passages||[]).map(p=>`<p class="imgline" style="font-family:var(--display);font-size:16px;font-style:italic">${esc(p.text)}</p><div class="cap">${esc(p.credit)}</div>${voteBtns(1, p.id)}`).join('')}`;
+    ${(r.passages||[]).map(p=>`<p class="imgline" style="font-family:var(--serif);font-weight:400;letter-spacing:0;font-size:17px;font-style:italic;color:var(--ink)">${esc(p.text)}</p><div class="cap">${esc(p.credit)}</div>${voteBtns(1, p.id)}`).join('')}`;
 }
 const BLOCKS = {motivation:"I can't get started", inspiration:"I don't know what to make", confidence:"I'm worried it won't be good"};
 function stuck(){
@@ -397,7 +469,7 @@ document.addEventListener('click', e=>{ const b = e.target.closest('button.v'); 
   b.parentElement.querySelectorAll('button.v').forEach(q=>{ q.dataset.on = q===b ? '1' : '0'; q.disabled = true; });
   $('status').textContent = good ? 'Noted: that one is on track. The map warmed around it.' : 'Noted: off track. That area is now less likely, and it won\'t show again.';
 });
-function showCp(){ const r = $('cp').getBoundingClientRect(); if (r.top > window.innerHeight - 120 || r.bottom < 0) $('cp').scrollIntoView({behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start'}); }
+function showCp(){ flag('checkpoint'); if (pane==='map'){ clearTimeout(paneTimer); paneTimer=setTimeout(()=>go('checkpoint'), REDUCE?0:2200); } }
 function esc(s){ return String(s??'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function answer(a){
   if (!current) return; const c=current.cell, x=(c%W+.5)/W, y=(((c/W)|0)+.5)/H;
@@ -406,13 +478,13 @@ function answer(a){
   if (a==='weirder'){ kappa += .6; BETA += .4; }
   history.push({title: current.title, ans: a, setting: current.setting});
   journey.trail.push({title: current.title, ans: a, setting: current.setting, when: new Date().toISOString().slice(0,10)}); saveJourney();
-  const li=document.createElement('li'); li.innerHTML=`<span>${esc(current.title)}</span><span>${a}</span>`; $('trail').appendChild(li); $('trailcard').hidden=false;
+  const li=document.createElement('li'); li.innerHTML=`<span>${esc(current.title)}</span><span>${a}</span>`; $('trail').appendChild(li); $('trailcard').hidden=false; $('trail-empty').hidden=true;
   $('sQ').textContent = history.length;
   fit(); reroutes++; $('sR').textContent = reroutes;
   const from = (a==='love'||a==='closer') ? c : anim.start;   // move forward only when the step felt right
   $('status').textContent = a==='no' ? 'Dead end. Raising the cost of that area and replanning…' : a==='weirder' ? 'Going stranger: favouring emptier, riskier ground…' : 'Noted. Moving forward and replanning…';
-  $('cp').innerHTML = `<div class="tag">Checkpoint</div><h2>Replanning…</h2><p class="imgline">The model updated. Watch the fog shift and the routes regrow.</p>`;
-  current=null; plan(from);
+  $('cp').innerHTML = `<div class="tag">Checkpoint</div><h2>Replanning…</h2><p class="imgline">The model updated. Watch the land reshape and the routes regrow on the map.</p>`;
+  current=null; plan(from); go('map');
 }
 function arrive(s){
   anim.arrived = true; const end = s.path[s.path.length-1];
@@ -431,24 +503,25 @@ function arrive(s){
       </div>`;
     showCp();
     paint($('sk'), bl, end*13);
-    $('a-again').onclick=()=>{ anim.arrived=false; kappa+=.3; plan(end); };
+    $('a-again').onclick=()=>{ anim.arrived=false; kappa+=.3; plan(end); go('map'); };
     $('a-reset').onclick=start;
   });
 }
 function start(){
   journey.sessions = (journey.sessions||0) + 1; saveJourney();
   rnd = mulberry(7 + history.length); history=[]; reroutes=0; kappa=1; BETA=.9; anim.arrived=false;
-  $('trail').innerHTML=''; $('trailcard').hidden=true; $('sQ').textContent='0'; $('sR').textContent='0';
+  $('trail').innerHTML=''; $('trailcard').hidden=true; $('trail-empty').hidden=false; $('sQ').textContent='0'; $('sR').textContent='0';
   seedObs(); fit(); busy=true;
   $('status').textContent='Searching for uncharted places your taste points to…';
-  $('cp').innerHTML = `<div class="tag">Checkpoint</div><h2>Searching…</h2><p class="imgline">Three routes are growing toward three empty spots. The Compass will stop where the best route is foggiest.</p>`;
-  plan(startCell());
+  $('cp').innerHTML = `<div class="tag">Checkpoint</div><h2>Searching…</h2><p class="imgline">Three routes are growing toward three empty spots. The Compass will stop where the best route is foggiest, and bring you here to ask.</p>`;
+  plan(startCell()); $('map-cta').hidden=true; go('map');
 }
-document.addEventListener('keydown', e=>{ if (e.target.tagName==='INPUT') return; const m={'1':'love','2':'closer','3':'no','4':'weirder'}[e.key]; if (m && current) answer(m); });
-$('go').onclick=start;
+document.addEventListener('keydown', e=>{ if (e.target.tagName==='INPUT') return; const m={'1':'love','2':'closer','3':'no','4':'weirder'}[e.key]; if (m && current && pane==='checkpoint') answer(m); });
+$('go').onclick=start; $('go-map').onclick=start;
 
 // initial resting frame: prior fog with the example seed applied, no search yet
 obs=[]; fit(); SD0 = Math.max(...SD); seedObs(); fit();
+$('trail-empty').hidden = journey.trail.length>0;
 if (journey.trail.length){ journey.trail.slice(-5).forEach(t=>{ const li=document.createElement('li'); li.innerHTML=`<span>${esc(t.title)}</span><span>${esc(t.ans)} · ${esc(t.when||'')}</span>`; $('trail').appendChild(li); }); $('trailcard').hidden=false; }
 if (DATA){ $('kindlegend').hidden=false; if (DATA.trained) $('status').textContent = `Seeded with ${DATA.trained} of your Another Angle picks. Press "Chart my map".`; }
 if (journey.obs.length) $('status').textContent = `Welcome back. Your map remembers ${journey.obs.length} answer${journey.obs.length===1?"":"s"} and ${journey.blocks.length} block${journey.blocks.length===1?"":"s"} from ${journey.sessions} session${journey.sessions===1?'':'s'}.`;

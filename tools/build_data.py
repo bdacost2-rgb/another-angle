@@ -189,7 +189,8 @@ def met(n):
     ids = []
     for q in ["photograph"] + QUERIES[:12]:
         try:
-            ids += (get("https://collectionapi.metmuseum.org/public/collection/v1/search",
+            # v1.1: the Met retired /v1/search on 2026-10-01. The new one is paginated (100 IDs per query by default).
+            ids += (get("https://collectionapi.metmuseum.org/public/collection/v1.1/search",
                         params={"q": q, "hasImages": "true", "departmentId": 19}).json().get("objectIDs") or [])[:200]
         except Exception as e:  # noqa: BLE001
             print("  Met", q, e)
@@ -213,8 +214,28 @@ def met(n):
 
 
 # ---------------- writing ----------------
+# The main site first, then Project Gutenberg's own mirror (same files) for when the main site is down for maintenance.
+GUTENBERG_HOSTS = ["https://www.gutenberg.org", "https://gutenberg.pglaf.org"]
+
+
+def gutenberg_text(book_id):
+    last = None
+    for host in list(GUTENBERG_HOSTS):
+        try:
+            r = requests.get(f"{host}/cache/epub/{book_id}/pg{book_id}.txt", headers=UA, timeout=40)
+            r.raise_for_status()
+            r.encoding = "utf-8"
+            if host != GUTENBERG_HOSTS[0]:  # remember the host that works, so later books go straight to it
+                GUTENBERG_HOSTS.remove(host)
+                GUTENBERG_HOSTS.insert(0, host)
+            return r.text
+        except Exception as e:  # noqa: BLE001
+            last = e
+    raise last
+
+
 def gutenberg(book_id, per_book):
-    text = get(f"https://www.gutenberg.org/cache/epub/{book_id}/pg{book_id}.txt").text
+    text = gutenberg_text(book_id)
     title = re.search(r"^Title:\s*(.+)$", text, re.M)
     author = re.search(r"^Author:\s*(.+)$", text, re.M)
     start = re.search(r"\*\*\* ?START OF.*?\*\*\*", text)
@@ -245,6 +266,11 @@ def load_clip():
     model = CLIPModel.from_pretrained(name).eval()
     proc = CLIPProcessor.from_pretrained(name)
     return torch, model, proc
+
+
+def feats(out):
+    """Newer transformers return an output object from get_*_features; the embedding is its pooler_output."""
+    return out if hasattr(out, "norm") else out.pooler_output
 
 
 def fetch_image(url):
@@ -282,6 +308,8 @@ def main():
             print(f"Gutenberg {b}: skipped ({e})")
 
     torch, model, proc = load_clip()
+    if not photos or not texts:
+        sys.exit("Stopped: no photos or no passages could be downloaded, so there is nothing to build. Try again later.")
     print(f"Downloading and embedding {len(photos)} images...")
     kept, vecs = [], []
     B = 32
@@ -293,7 +321,7 @@ def main():
         if not pairs:
             continue
         with torch.no_grad():
-            e = model.get_image_features(**proc(images=[im for _, im in pairs], return_tensors="pt"))
+            e = feats(model.get_image_features(**proc(images=[im for _, im in pairs], return_tensors="pt")))
         vecs.append(torch.nn.functional.normalize(e, dim=-1).numpy())
         kept += [p for p, _ in pairs]
         print(f"  {len(kept)} images", end="\r")
@@ -303,7 +331,7 @@ def main():
     for i in range(0, len(texts), 64):
         batch = [t["text"] for t in texts[i:i + 64]]
         with torch.no_grad():
-            e = model.get_text_features(**proc(text=batch, return_tensors="pt", padding=True, truncation=True, max_length=77))
+            e = feats(model.get_text_features(**proc(text=batch, return_tensors="pt", padding=True, truncation=True, max_length=77)))
         tvecs.append(torch.nn.functional.normalize(e, dim=-1).numpy())
 
     items = [{"id": f"p{i}", "kind": "photo", **p} for i, p in enumerate(kept)] + \
@@ -325,8 +353,8 @@ def main():
     for it, (x, y) in zip(items, xy):
         it["x"], it["y"] = round(float(x), 4), round(float(y), 4)
     with torch.no_grad():
-        th = model.get_text_features(**proc(text=[f"{t['n']}: {t['desc']}" for t in UNCHARTED_THEMES],
-                                            return_tensors="pt", padding=True))
+        th = feats(model.get_text_features(**proc(text=[f"{t['n']}: {t['desc']}" for t in UNCHARTED_THEMES],
+                                                  return_tensors="pt", padding=True)))
     TH = l2n(l2n(th.numpy()) - Tm)
     themes = []
     for k, t in enumerate(UNCHARTED_THEMES):
