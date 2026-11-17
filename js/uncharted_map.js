@@ -95,7 +95,7 @@ function seedObs(){
   const mind = document.getElementById('mind').value.toLowerCase();
   THEMES.forEach(t=>{ if ((MIND_HINTS[t.n]||[]).some(h=>mind.includes(h))) obs.push({x:t.x, y:t.y, yv:1, w:.5}); });
   if (night){ ["Film noir","Cosmic"].forEach(n=>{ const t=THEMES.find(q=>q.n===n); obs.push({x:t.x,y:t.y,yv:1,w:.2}); }); }
-  if (DATA && DATA.train) DATA.train.forEach(o=>obs.push(o));   // your Another Angle picks and hearts
+  if (DATA && DATA.train) DATA.train.forEach(o=>obs.push({...o, itemId:o.id}));   // your Another Angle picks and hearts
   if (typeof journey !== 'undefined') journey.obs.forEach(o=>obs.push(o));   // everything you've answered before
   if (!obs.length) obs.push({x:.5,y:.5,yv:1,w:.1});
 }
@@ -354,7 +354,7 @@ async function words(bl, setting, history){
 const $=id=>document.getElementById(id);
 let history=[], reroutes=0, current=null, busy=false;
 // ---------- sections: seed, map, checkpoint, logbook. One on screen at a time; the rail switches. ----------
-const PANES=['seed','map','checkpoint','logbook']; let pane='seed', paneTimer=0;
+const PANES=['seed','gallery','map','checkpoint','logbook']; let pane=DATA && DATA.trained>=8?'gallery':'seed', paneTimer=0;
 function go(name){ clearTimeout(paneTimer); pane=name;
   PANES.forEach(n=>{ $('pane-'+n).hidden = n!==name; const b=document.querySelector(`.rail [data-pane="${n}"]`); if (n===name){ b.setAttribute('aria-current','true'); b.removeAttribute('data-new'); } else b.removeAttribute('aria-current'); });
   if (name==='map') requestAnimationFrame(resize); window.scrollTo(0,0); }
@@ -516,6 +516,14 @@ function start(){
   $('cp').innerHTML = `<div class="tag">Checkpoint</div><h2>Searching…</h2><p class="imgline">Three routes are growing toward three empty spots. The Compass will stop where the best route is foggiest, and bring you here to ask.</p>`;
   plan(startCell()); $('map-cta').hidden=true; go('map');
 }
+window.addEventListener('compass:gallery-vote', e=>{
+  const vote=e.detail;
+  if (!vote || vote.id==null || !Number.isFinite(vote.x) || !Number.isFinite(vote.y)) return;
+  obs=obs.filter(o=>o.itemId!==vote.id);
+  obs.push({...vote, itemId:vote.id});
+  fit();
+  if (busy){ anim.arrived=false; plan(anim.start ?? startCell()); $('status').textContent='Your gallery choice updated the model. Replanning the routes…'; }
+});
 document.addEventListener('keydown', e=>{ if (e.target.tagName==='INPUT') return; const m={'1':'love','2':'closer','3':'no','4':'weirder'}[e.key]; if (m && current && pane==='checkpoint') answer(m); });
 $('go').onclick=start; $('go-map').onclick=start;
 
@@ -525,5 +533,6 @@ $('trail-empty').hidden = journey.trail.length>0;
 if (journey.trail.length){ journey.trail.slice(-5).forEach(t=>{ const li=document.createElement('li'); li.innerHTML=`<span>${esc(t.title)}</span><span>${esc(t.ans)} · ${esc(t.when||'')}</span>`; $('trail').appendChild(li); }); $('trailcard').hidden=false; }
 if (DATA){ $('kindlegend').hidden=false; if (DATA.trained) $('status').textContent = `Seeded with ${DATA.trained} of your Another Angle picks. Press "Chart my map".`; }
 if (journey.obs.length) $('status').textContent = `Welcome back. Your map remembers ${journey.obs.length} answer${journey.obs.length===1?"":"s"} and ${journey.blocks.length} block${journey.blocks.length===1?"":"s"} from ${journey.sessions} session${journey.sessions===1?'':'s'}.`;
+go(pane);
 window.addEventListener('resize', resize); if (window.ResizeObserver) new ResizeObserver(()=>{ if (Math.abs(cv.getBoundingClientRect().width-CW)>1) resize(); }).observe(cv); resize(); requestAnimationFrame(tick);
 })();

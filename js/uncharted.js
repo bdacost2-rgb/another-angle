@@ -10,6 +10,7 @@ import { loadArchive, normalize, dot } from "./data.js";
 import { TasteModel } from "./taste.js";
 import { EXERCISES, diagnose } from "./coach_data.js";
 import { mergeInto } from "./mine.js";
+import { initGallery } from "./uncharted_gallery.js";
 
 const COACH_STORE = "anotherangle.coach.v1";
 const BROAD = { motivation: "Motivation & Energy", inspiration: "Idea Generation & Starting", confidence: "Perfectionism & Self-Criticism" };
@@ -85,7 +86,7 @@ async function main() {
     for (const [id, l] of T.labels) {
       const it = T.byId.get(id);
       if (!it) continue;
-      train.push({ x: it.x, y: it.y, yv: l.y, w: l.y ? 0.35 * l.w : 0.15 * l.w });
+      train.push({ id, x: it.x, y: it.y, yv: l.y, w: l.y ? 0.35 * l.w : 0.15 * l.w });
     }
     window.COMPASS_DATA = {
       themes, train, trained: T.count, journey: null,
@@ -147,7 +148,9 @@ async function main() {
         return { ok: true };
       },
     };
+    initGallery(items, T);
   }
+  if (!(A && A.themes.length)) initGallery([], null);
   const s = document.createElement("script");
   s.src = "js/uncharted_map.js";
   document.body.append(s);
