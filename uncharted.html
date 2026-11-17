@@ -88,16 +88,24 @@ canvas#map { display: block; width: 100%; aspect-ratio: 16 / 10; max-width: 100%
 .v[data-on="1"][data-g="1"] { color: var(--accent); border-color: var(--accent); }
 .v[data-on="1"][data-g="0"] { color: var(--sea); border-color: var(--sea); }
 .v:disabled:not([data-on="1"]) { opacity: .35; cursor: default; }
-.near { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 10px; }
-.near-item { display: flex; flex-direction: column; min-width: 0; margin: 0; padding: 10px; border: 1px solid var(--line); background: var(--surface); }
-.near-item.near-passage { grid-column: 1 / -1; }
+.near { position: relative; display: grid; grid-template-columns: 1fr; gap: clamp(72px, 12vh, 136px); margin-top: 10px; padding: clamp(42px, 8vh, 100px) 0; perspective: 1100px; isolation: isolate; }
+.near-spiral-trace { position: absolute; z-index: -1; inset: 0 auto 0 50%; width: min(100%, 760px); height: 100%; transform: translateX(-50%); pointer-events: none; overflow: visible; }
+.near-spiral-trace path { fill: none; stroke: rgba(255,229,207,.3); stroke-width: .7; stroke-dasharray: 2 9; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.near-item { position: relative; left: 50%; z-index: 1; display: flex; flex-direction: column; width: min(100%, 520px); min-width: 0; margin: 0; padding: 10px; border: 1px solid var(--line); background: rgba(24,24,26,.96); transform: translate3d(calc(-50% + var(--spiral-x, 0px)), 0, 0) rotateY(var(--spiral-yaw, 0deg)) rotateZ(var(--spiral-rotation, 0deg)) scale(var(--spiral-scale, 1)); transform-style: preserve-3d; backface-visibility: hidden; will-change: transform; }
+.near-item.near-passage { width: min(100%, 660px); }
 .near img { width: 100%; aspect-ratio: 3 / 2; object-fit: contain; display: block; background: #242326; }
 .near-caption { display: grid; gap: 3px; margin-top: 8px; }
 .near-kind { font: 400 10px var(--mono); letter-spacing: 0; color: var(--muted); text-transform: lowercase; }
 .near-title { display: block; margin: 0; font: 500 13px/1.35 var(--body); letter-spacing: inherit; }
 .near-credit { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.4; }
 .near-quote { margin: 8px 0; font: 400 17px/1.45 var(--serif); letter-spacing: 0; }
-@media (max-width: 620px) { .near { grid-template-columns: 1fr; } .near-item.near-passage { grid-column: auto; } }
+.cp-cursor { position: fixed; z-index: 30; top: 0; left: 0; display: grid; width: 72px; height: 72px; place-items: center; border: 1px solid rgba(255,229,207,.9); border-radius: 50%; color: var(--warm); font: 400 9px var(--mono); letter-spacing: .08em; mix-blend-mode: difference; opacity: 0; pointer-events: none; transform: translate3d(-100px,-100px,0) translate(-50%,-50%); transition: opacity .16s, width .2s, height .2s; }
+.cp-cursor::before { content: ""; position: absolute; inset: 6px; border: 1px solid rgba(255,229,207,.48); border-radius: 50%; }
+.cp-cursor.is-visible { opacity: 1; }
+.cp-cursor[data-kind="read"] { width: 84px; height: 84px; }
+@media (hover: hover) and (pointer: fine) { .near { cursor: none; } .near .v { cursor: pointer; } }
+@media (hover: none), (pointer: coarse) { .cp-cursor { display: none; } }
+@media (max-width: 620px) { .near { gap: 56px; padding: 36px 0; } .near-item { width: min(100%, 430px); } .near-item.near-passage { width: min(100%, 520px); } .cp-cursor { display: none; } }
 details.how { margin-top: 26px; border-top: 1px solid var(--line); padding-top: 14px; color: var(--muted); }
 details.how summary { cursor: pointer; color: var(--ink); font-weight: 500; }
 details.how ol { max-width: 75ch; padding-left: 20px; }
@@ -366,6 +374,7 @@ details.key .legend { position: absolute; right: 0; bottom: 28px; width: 270px; 
         <p class="imgline">When a route runs into fog, the Compass stops, shows what already exists nearby and what could exist there, and asks how you feel about it. Chart your map and it will bring you here.</p>
         <p style="margin-top:22px"><a class="btn" href="#" data-go-pane="map">Go to the map →</a></p>
       </div>
+      <div class="cp-cursor" id="cp-cursor" aria-hidden="true"><span>LOOK</span></div>
     </section>
 
     <!-- 05 logbook -->

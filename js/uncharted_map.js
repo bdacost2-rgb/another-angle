@@ -287,8 +287,48 @@ let history=[], reroutes=0, current=null, busy=false;
 const PANES=['seed','gallery','map','checkpoint','logbook']; let pane=DATA && DATA.trained>=8?'gallery':'seed', paneTimer=0;
 function go(name){ clearTimeout(paneTimer); pane=name;
   PANES.forEach(n=>{ $('pane-'+n).hidden = n!==name; const b=document.querySelector(`.rail [data-pane="${n}"]`); if (n===name){ b.setAttribute('aria-current','true'); b.removeAttribute('data-new'); } else b.removeAttribute('aria-current'); });
-  if (name==='map') requestAnimationFrame(resize); window.scrollTo(0,0); }
+  if (name==='map') requestAnimationFrame(resize); window.scrollTo(0,0); if (name==='checkpoint') queueSpiral(); }
 function flag(name){ if (pane!==name) document.querySelector(`.rail [data-pane="${name}"]`).setAttribute('data-new','1'); }
+let spiralFrame=0;
+function queueSpiral(){ if (!spiralFrame) spiralFrame=requestAnimationFrame(updateSpiral); }
+function updateSpiral(){
+  spiralFrame=0;
+  if (pane!=='checkpoint') return;
+  const items=document.querySelectorAll('#cp .near-item'), vh=window.innerHeight||1;
+  const maxX=window.innerWidth < 620 ? Math.min(10, window.innerWidth*.025) : Math.min(190, window.innerWidth*.13);
+  const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  items.forEach(item=>{
+    const i=Number(item.dataset.spiral)||0;
+    const rect=item.getBoundingClientRect(), depth=(rect.top+rect.height/2-vh*.52)/(vh*.9);
+    const phase=depth*Math.PI*1.45+i*Math.PI*.72;
+    const x=reduce?Math.sin((i+1)*Math.PI/2)*maxX*.75:Math.sin(phase)*maxX;
+    const yaw=reduce?0:Math.sin(phase)*7;
+    const rotation=reduce?Math.cos((i+1)*Math.PI/2)*3:Math.cos(phase)*3;
+    const scale=reduce?1:1-Math.min(1,Math.abs(depth))*.055;
+    item.style.setProperty('--spiral-x', `${x.toFixed(1)}px`);
+    item.style.setProperty('--spiral-yaw', `${yaw.toFixed(1)}deg`);
+    item.style.setProperty('--spiral-rotation', `${rotation.toFixed(1)}deg`);
+    item.style.setProperty('--spiral-scale', scale.toFixed(3));
+  });
+}
+window.addEventListener('scroll', queueSpiral, {passive:true});
+window.addEventListener('resize', queueSpiral);
+const cpCursor=$('cp-cursor');
+document.addEventListener('pointermove', e=>{
+  const target=e.target instanceof Element?e.target:null;
+  const gallery=target?.closest('#pane-checkpoint .near');
+  const item=target?.closest('#pane-checkpoint .near-item');
+  if (!gallery || e.pointerType==='touch' || target.closest('button,a,input')){
+    cpCursor.classList.remove('is-visible');
+    return;
+  }
+  cpCursor.style.transform=`translate3d(${e.clientX}px,${e.clientY}px,0) translate(-50%,-50%)`;
+  const kind=item?.classList.contains('near-passage')?'read':item?'look':'follow';
+  cpCursor.dataset.kind=kind;
+  cpCursor.firstElementChild.textContent=kind==='read'?'READ':kind==='look'?'LOOK':'FOLLOW';
+  cpCursor.classList.add('is-visible');
+}, {passive:true});
+window.addEventListener('blur', ()=>cpCursor.classList.remove('is-visible'));
 document.querySelectorAll('.rail [data-pane]').forEach(b=>b.onclick=()=>go(b.dataset.pane));
 document.addEventListener('click', e=>{ const a=e.target.closest('[data-go-pane]'); if (a){ e.preventDefault(); go(a.dataset.goPane); } });
 // ---------- your saved identity: answers, routes and blocks carry across sessions ----------
@@ -358,8 +398,9 @@ async function nearest(cell){
   return {
     title,
     html: `<div class="near" aria-label="Nearby archive works">
-      ${photos.map(p=>`<figure class="near-item near-photo"><img src="${esc(p.src)}" alt="${esc(p.title)}"><figcaption class="near-caption"><span class="near-kind">photograph</span><strong class="near-title">${esc(p.title)}</strong><span class="near-credit">${esc(p.credit)}</span></figcaption>${voteBtns(0, p.id)}</figure>`).join('')}
-      ${passages.map(p=>`<article class="near-item near-passage"><span class="near-kind">writing</span><h3 class="near-title">${esc(p.title)}</h3><blockquote class="near-quote">${esc(p.text)}</blockquote><p class="near-credit">${esc(p.credit)}</p>${voteBtns(1, p.id)}</article>`).join('')}
+      <svg class="near-spiral-trace" viewBox="0 0 100 1200" preserveAspectRatio="none" aria-hidden="true"><path d="M50 0 C86 45 93 105 50 150 C7 195 14 255 50 300 C86 345 93 405 50 450 C7 495 14 555 50 600 C86 645 93 705 50 750 C7 795 14 855 50 900 C86 945 93 1005 50 1050 C7 1095 14 1155 50 1200"/></svg>
+      ${photos.map((p,i)=>`<figure class="near-item near-photo" data-spiral="${i}"><img src="${esc(p.src)}" alt="${esc(p.title)}"><figcaption class="near-caption"><span class="near-kind">photograph</span><strong class="near-title">${esc(p.title)}</strong><span class="near-credit">${esc(p.credit)}</span></figcaption>${voteBtns(0, p.id)}</figure>`).join('')}
+      ${passages.map((p,i)=>`<article class="near-item near-passage" data-spiral="${photos.length+i}"><span class="near-kind">writing</span><h3 class="near-title">${esc(p.title)}</h3><blockquote class="near-quote">${esc(p.text)}</blockquote><p class="near-credit">${esc(p.credit)}</p>${voteBtns(1, p.id)}</article>`).join('')}
     </div>`,
   };
 }
