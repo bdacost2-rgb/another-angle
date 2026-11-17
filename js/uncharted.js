@@ -1,19 +1,12 @@
 // Uncharted on the website: everything the Colab version did in Python, done in the browser.
 //  - The map: every photo and passage, laid out by meaning (t-SNE, made by tools/build_data.py).
 //  - Seeds: your Another Angle picks and hearts warm the map, so it starts from your real taste.
-//  - Checkpoints show the real archive works closest in MEANING to that spot (CLIP), and
-//    a blend of two of them stands in for "what could exist here" (no paid image generation).
+//  - Checkpoints show nearby archive works directly and leave their connection to the viewer.
 //  - On/off track votes train the same taste model as the feed, so both get smarter together.
-//  - "I'm stuck here" uses the teammate's coach: their diagnosis and exercises, ranked by what
-//    has helped you before, and saved to the same history as the full coach.
 import { loadArchive, normalize, dot } from "./data.js";
 import { TasteModel } from "./taste.js";
-import { EXERCISES, diagnose } from "./coach_data.js";
 import { mergeInto } from "./mine.js";
 import { initGallery } from "./uncharted_gallery.js";
-
-const COACH_STORE = "anotherangle.coach.v1";
-const BROAD = { motivation: "Motivation & Energy", inspiration: "Idea Generation & Starting", confidence: "Perfectionism & Self-Criticism" };
 
 function pcaLayout(items) {
   // Fallback when the data has no t-SNE layout: the two main directions of variation.
@@ -59,11 +52,6 @@ function placeThemes(themes, items) {
   }
 }
 
-function coachData() {
-  try { return JSON.parse(localStorage.getItem(COACH_STORE)) || { profile: {}, history: [], learned_examples: [] }; }
-  catch (e) { return { profile: {}, history: [], learned_examples: [] }; }
-}
-
 async function main() {
   let A;
   try { A = await loadArchive(); } catch (e) { console.error(e); A = null; }
@@ -95,7 +83,6 @@ async function main() {
     };
 
     const shownPhotos = [], offTrack = new Set();
-    let last = { text: "", category: null };
     window.UNCHARTED_BRIDGE = {
       // The real works closest in meaning to a checkpoint: the theme blend there + the nearest passage.
       "compass.peek": (ids) => {
@@ -122,29 +109,6 @@ async function main() {
         const it = items[i];
         if (it) T.label(it, good ? 1 : 0);
         if (!good && kind === 0) offTrack.add(i);
-        return { ok: true };
-      },
-      // "I'm stuck here": the teammate's diagnosis and exercises, ranked by what has helped you.
-      "compass.coach": (block, text, title, setting) => {
-        let category = BROAD[block] || "Idea Generation & Starting";
-        if (text) { const [[top, score]] = diagnose(text); if (score > 0) category = top; }
-        const data = coachData();
-        const score = (e) => {
-          let a = 1, b = 1;
-          for (const r of data.history) if (r.category === category && r.exercise === e) { const v = { Yes: 1, Partly: 0.5, No: 0 }[r.helped] ?? 0.5; a += v; b += 1 - v; }
-          return a / (a + b) + Math.random() * 0.15;
-        };
-        const exercise = [...EXERCISES[category]].sort((x, y) => score(y) - score(x))[0];
-        last = { text: text || block, category };
-        const reply = `This sounds like ${category.toLowerCase()}. Stay at "${title}"${setting ? ` (${setting})` : ""} and try this, in words or in frames: ${exercise}`;
-        return { text: reply, block: category.split(" & ")[0].split(" ")[0], intervention: exercise, label: category };
-      },
-      "compass.coach_feedback": (block, exercise, helped) => {
-        if (!last.category) return { ok: false };
-        const data = coachData();
-        data.history.push({ timestamp: new Date().toISOString().slice(0, 16).replace("T", " "), problem: last.text, category: last.category,
-          exercise, helped: helped ? "Yes" : "No", progress: "", source: "Uncharted" });
-        try { localStorage.setItem(COACH_STORE, JSON.stringify(data)); } catch (e) { /* ignore */ }
         return { ok: true };
       },
     };

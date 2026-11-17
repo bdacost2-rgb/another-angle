@@ -276,79 +276,9 @@ function draw(){
       ctx.fillStyle=`rgba(18,18,20,${.82*ptr.a})`; ctx.fillRect(lx-6,ly-13,tw+12,19); ctx.fillStyle=`rgba(244,244,244,${ptr.a})`; ctx.fillText(label,lx,ly); ctx.textAlign='center'; } }
 }
 
-// ---------- blending: what lives at a point ----------
-function blendAt(c){ const x=(c%W+.5)/W, y=(((c/W)|0)+.5)/H;
-  const ws = THEMES.map(t=>Math.exp(-((x-t.x)**2+((y-t.y)*.625)**2)/(2*.12*.12)));
-  const s = ws.reduce((a,b)=>a+b,0)||1; return THEMES.map((t,i)=>({t, w:ws[i]/s})).sort((a,b)=>b.w-a.w).slice(0,3); }
-function settingFor(bl){ const a=bl[0].t, b=bl[1].t; return `${a.place[0].toUpperCase()+a.place.slice(1)}, ${b.year < 0 ? (-b.year)+" BCE" : b.year}`; }
-
-// ---------- what could exist here: a blend of the two closest real photos (free, no image generator) ----------
-let lastPhotos = [];
-function paint(canvas, bl, seed){
-  const srcs = lastPhotos.map(p=>p.src).slice(0,2);
-  if (!srcs.length) { sketch(canvas, bl, seed); return 'Sketch drawn by code from this spot\'s blend of themes'; }
-  const w=canvas.width=480, h=canvas.height=360, g=canvas.getContext('2d');
-  const pal=[...bl[0].t.pal]; g.fillStyle=pal[3]; g.fillRect(0,0,w,h);
-  const draw1=(img, alpha, mode)=>{ const s=Math.max(w/img.width, h/img.height), iw=img.width*s, ih=img.height*s;
-    g.globalAlpha=alpha; g.globalCompositeOperation=mode; g.drawImage(img,(w-iw)/2,(h-ih)/2,iw,ih); };
-  const load=src=>new Promise(r=>{ const im=new Image(); im.onload=()=>r(im); im.onerror=()=>r(null); im.src=src; });
-  Promise.all(srcs.map(load)).then(([a,b])=>{
-    if (!a && !b){ sketch(canvas, bl, seed); return; }
-    g.clearRect(0,0,w,h); if (a) draw1(a,1,'source-over'); if (b) draw1(b,.55, a?'soft-light':'source-over');
-    g.globalCompositeOperation='color'; g.globalAlpha=.22; g.fillStyle=pal[1]; g.fillRect(0,0,w,h);
-    g.globalCompositeOperation='source-over'; g.globalAlpha=1; });
-  return 'A blend of the two closest real works: a place between them that nobody has photographed yet';
-}
-
-// ---------- procedural sketch (fallback when no photos are loaded) ----------
-function sketch(canvas, bl, seed){
-  const r=mulberry(seed), w=canvas.width=480, h=canvas.height=360, g=canvas.getContext('2d');
-  const pal = [...bl[0].t.pal, ...bl[1].t.pal.slice(0,2)];
-  const grd=g.createLinearGradient(0,0,0,h); grd.addColorStop(0,pal[3]); grd.addColorStop(.6,pal[0]); grd.addColorStop(1,pal[1]); g.fillStyle=grd; g.fillRect(0,0,w,h);
-  const horizon = h*(.45+r()*.25);
-  // distant forms
-  for (let k=0;k<5;k++){ g.fillStyle=pal[(k+2)%pal.length]; g.globalAlpha=.25+r()*.4; g.beginPath(); const cx=r()*w, rw=40+r()*160, rh=30+r()*120;
-    if (r()<.5){ g.ellipse(cx,horizon-rh*.3,rw,rh,0,0,7); } else { g.rect(cx-rw/4,horizon-rh,rw/2,rh); g.moveTo(cx-rw/4,horizon-rh); g.arc(cx,horizon-rh,rw/4,Math.PI,0); }
-    g.fill(); }
-  g.globalAlpha=1; g.fillStyle=pal[1]; g.globalAlpha=.85; g.fillRect(0,horizon,w,h-horizon);
-  // a light source
-  g.globalAlpha=.9; const lx=r()*w, ly=h*(.12+r()*.25); const rg=g.createRadialGradient(lx,ly,2,lx,ly,90); rg.addColorStop(0,pal[2]); rg.addColorStop(1,'rgba(0,0,0,0)'); g.fillStyle=rg; g.fillRect(0,0,w,h);
-  // a figure
-  g.globalAlpha=.95; g.fillStyle=pal[3]; const fx=w*(.25+r()*.5), fh=50+r()*40; g.beginPath(); g.ellipse(fx,horizon-fh,7,9,0,0,7); g.fill(); g.fillRect(fx-6,horizon-fh+8,12,fh-8);
-  // reflections / lines
-  g.strokeStyle=pal[2]; g.globalAlpha=.25; for(let k=0;k<14;k++){ const y=horizon+6+r()*(h-horizon); g.beginPath(); g.moveTo(r()*w,y); g.lineTo(r()*w,y); g.stroke(); }
-  // grain
-  const id=g.getImageData(0,0,w,h); for(let k=0;k<id.data.length;k+=4){ const n=(r()-.5)*28; id.data[k]+=n; id.data[k+1]+=n; id.data[k+2]+=n; } g.putImageData(id,0,0);
-  g.globalAlpha=1;
-}
-
-// ---------- text for a checkpoint (Claude if allowed, else composed from the blend) ----------
-let samplePromise = (window.claude && window.claude.use) ? window.claude.use("sample") : Promise.resolve(null);
-function composed(bl, setting){ const a=bl[0].t, b=bl[1].t, pick=(arr,s)=>arr[Math.floor(mulberry(s)()*arr.length)];
-  const s = (obs.length*31)|0;
-  return { title: `${a.n} × ${b.n}`, setting,
-    image: `A photograph of ${pick(a.words,s)} beside ${pick(b.words,s+1)}, lit like ${night?'a late night':'late afternoon'}.`,
-    line: `In ${setting}, ${pick(a.words,s+2)} and ${pick(b.words,s+3)} share the same room, and nobody in the house thinks that is strange.` }; }
 // The website's bridge (js/uncharted.js) does what the Colab Python callbacks used to do.
 const BRIDGE = window.UNCHARTED_BRIDGE || {};
 async function callPy(name, args){ const f = BRIDGE[name]; if (!f) return null; try { return await f(...args); } catch(e) { console.error(e); return null; } }
-function parseJSON(t){ try { const m = String(t).match(/\{[\s\S]*\}/); return m ? JSON.parse(m[0]) : null; } catch(e) { return null; } }
-function promptFor(bl, setting, history){
-  return `You are the imagination inside Aesthetic Compass, a tool that finds the creative work only one person would make.
-At this point on their taste map the themes blend as: ${bl.map(b=>`${b.t.n} ${(b.w*100).toFixed(0)}%`).join(', ')}.
-The place and time is a blend that never existed: "${setting}".
-They are in ${document.getElementById('here').value} on a ${document.getElementById('nowtxt').textContent}. On their mind: "${document.getElementById('mind').value}".
-Their reactions so far: ${history.length? history.map(h=>`${h.title}: ${h.ans}`).join('; ') : 'none yet'}.
-Invent something strange and specific, never generic. Return JSON only: {"title": "evocative 2-5 word title", "setting": "place, year (may refine the given one)", "image": "one sentence describing a photograph that exists only here", "line": "two sentences of prose in that world, literary, concrete, under 45 words"}`;
-}
-async function words(bl, setting, history){
-  const fallback = composed(bl, setting);
-  const sample = await samplePromise.catch(()=>null);
-  if (!sample) return fallback;
-  const prompt = promptFor(bl, setting, history);
-  try { const j = await sample.json(prompt, {modelTier:"quick"}); if (j && j.title && j.line) return j; } catch(e) {}
-  return fallback;
-}
 
 // ---------- the loop ----------
 const $=id=>document.getElementById(id);
@@ -394,71 +324,38 @@ function tick(){
   }
   requestAnimationFrame(tick);
 }
-async function ask(cell){
-  const bl = blendAt(cell), setting = settingFor(bl);
-  $('status').textContent = `Checkpoint: the route is foggy here (${(Math.min(1,SD[cell]/SD0)*100).toFixed(0)}% unsure). Asking you.`;
-  $('cp').innerHTML = `<div class="tag">Checkpoint ${history.length+1} · ${bl.map(b=>b.t.n+' '+(b.w*100).toFixed(0)+'%').join(' · ')}</div>
-    <h2 class="thinking">Imagining this spot…</h2>`;
-  const [j, near] = await Promise.all([words(bl, setting, history), nearest(cell)]);
-  current = {cell, bl, ...j};
-  $('cp').innerHTML = `<div class="tag">Checkpoint ${history.length+1} · ${bl.map(b=>b.t.n+' '+(b.w*100).toFixed(0)+'%').join(' · ')}</div>
+async function ask(cell, label = `Checkpoint ${history.length+1}`, statusText = null){
+  $('status').textContent = statusText || `Checkpoint: this area is uncertain (${(Math.min(1,SD[cell]/SD0)*100).toFixed(0)}%). Review the nearby works.`;
+  $('cp').innerHTML = `<div class="tag">${esc(label)}</div><h2 class="thinking">Finding nearby works…</h2>`;
+  const nearby = await nearest(cell);
+  current = {cell, title: nearby.title};
+  $('cp').innerHTML = `<div class="tag">${esc(label)}</div>
     <div class="cpgrid">
-    <div class="cp-imagined"><div class="col-h">What the Compass imagines here</div>
-      <h2>${esc(j.title)}</h2><div class="setting">${esc(j.setting||setting)}</div>
-      <canvas class="sketch" id="sk"></canvas><div class="cap" id="skcap"></div>
-      <p class="frag">“${esc(j.line)}”</p><p class="imgline">${esc(j.image)}</p></div>
-    <div class="cp-nearby"><div class="col-h">Nearby work · mark each piece</div>${near || '<p class="imgline">No archive data loaded yet.</p>'}</div>
-    <div class="cp-feedback"><div class="col-h">How do you feel about this spot?</div>
+    <div class="cp-nearby"><div class="col-h">Proposed works · mark each one</div>${nearby.html || '<p class="imgline">No archive data loaded yet.</p>'}</div>
+    <div class="cp-feedback"><div class="col-h">How do you feel about this collection?</div>
     <div class="cp-feedback-actions"><div class="answers">
       <button class="ans" id="a-love" type="button">Love it<kbd>1</kbd></button>
       <button class="ans" id="a-closer" type="button">Closer<kbd>2</kbd></button>
       <button class="ans" id="a-no" type="button">Not me<kbd>3</kbd></button>
       <button class="ans" id="a-weird" type="button">Weirder<kbd>4</kbd></button>
-      <button class="ans stuck" id="a-stuck" type="button">I'm stuck here</button>
-    </div><div id="coachbox"></div></div></div></div>`;
+    </div></div></div></div>`;
   showCp();
-  $('skcap').textContent = paint($('sk'), bl, cell*7+history.length);
-  $('a-love').onclick=()=>answer('love'); $('a-closer').onclick=()=>answer('closer'); $('a-no').onclick=()=>answer('no'); $('a-weird').onclick=()=>answer('weirder'); $('a-stuck').onclick=stuck;
+  $('a-love').onclick=()=>answer('love'); $('a-closer').onclick=()=>answer('closer'); $('a-no').onclick=()=>answer('no'); $('a-weird').onclick=()=>answer('weirder');
 }
 async function nearest(cell){
-  if (!DATA) return '';
+  if (!DATA) return {title: "Nearby works", html: ""};
   const x=(cell%W+.5)/W, y=(((cell/W)|0)+.5)/H, d=w=>(w.x-x)**2+(w.y-y)**2;
   const ph = WORKS.filter(w=>!w.kind).sort((a,b)=>d(a)-d(b)).slice(0,2), wr = WORKS.filter(w=>w.kind).sort((a,b)=>d(a)-d(b)).slice(0,1);
   const r = await callPy('compass.peek', [[...ph, ...wr].map(w=>[w.kind, w.id])]);
-  lastPhotos = (r && r.photos) || [];
-  if (!r) return '';
-  return `<div class="near" aria-label="Nearby archive works">
-    ${(r.photos||[]).map(p=>`<figure class="near-item near-photo"><img src="${esc(p.src)}" alt="${esc(p.title)}"><figcaption class="near-caption"><span class="near-kind">photograph</span><strong class="near-title">${esc(p.title)}</strong><span class="near-credit">${esc(p.credit)}</span></figcaption>${voteBtns(0, p.id)}</figure>`).join('')}
-    ${(r.passages||[]).map(p=>`<article class="near-item near-passage"><span class="near-kind">writing</span><h3 class="near-title">${esc(p.title)}</h3><blockquote class="near-quote">${esc(p.text)}</blockquote><p class="near-credit">${esc(p.credit)}</p>${voteBtns(1, p.id)}</article>`).join('')}
-  </div>`;
-}
-const BLOCKS = {motivation:"I can't get started", inspiration:"I don't know what to make", confidence:"I'm worried it won't be good"};
-function stuck(){
-  if (!current) return;
-  $('coachbox').innerHTML = `<div class="coach"><div class="tag">Coach · what's in the way?</div>
-    <div class="chips" style="margin-top:8px">${Object.entries(BLOCKS).map(([k,v])=>`<button class="chip" type="button" data-b="${k}" data-s="0">${v}</button>`).join('')}</div>
-    <input type="text" id="blocktxt" placeholder="Or say it in your own words" style="margin-top:8px">
-    <button class="btn" id="coachgo" type="button" style="margin-top:8px;width:100%">Coach me</button><div id="coachout"></div></div>`;
-  let chosen = '';
-  document.querySelectorAll('#coachbox .chip').forEach(b=>b.onclick=()=>{ chosen=b.dataset.b; document.querySelectorAll('#coachbox .chip').forEach(q=>q.dataset.s = q===b ? '1' : '0'); });
-  $('coachgo').onclick = async ()=>{
-    const cur = current; if (!cur) return;
-    $('coachout').innerHTML = '<p class="thinking">The coach is reading your map…</p>';
-    let r = await callPy('compass.coach', [chosen, $('blocktxt').value, cur.title, cur.setting||'', history.map(h=>h.title+': '+h.ans).join('; ')]);
-    if (!r || !r.text){ const b = chosen || 'inspiration';
-      const local = {motivation:`Set a 10-minute timer. Make three rough frames or three sentences of "${cur.title}". Stop when it rings.`,
-        inspiration:`Borrow one detail from this checkpoint (${(cur.image||'').toLowerCase()}) and find its echo where you are today.`,
-        confidence:`Make it badly on purpose. Five frames or one paragraph of "${cur.title}" that nobody will see.`};
-      r = {text: local[b], block: b, intervention: 'local', label: BLOCKS[b]}; }
-    $('coachout').innerHTML = `<p class="imgline" style="color:var(--ink);font-size:15px;margin-top:12px">${esc(r.text)}</p>
-      <div class="answers"><button class="ans" id="c-yes" type="button">That helped</button><button class="ans" id="c-no" type="button">Didn't help</button></div>
-      <p class="cap" style="margin-top:8px"><a href="index.html#coach" target="_blank" style="color:var(--sea)">Talk it through with the full coach</a></p>`;
-    const done = (helped)=>{ const [x,y] = cellXY(cur.cell);
-      journey.blocks.push({x, y, block: r.block, helped, intervention: r.intervention}); journey.blocks = journey.blocks.slice(-30);
-      if (helped){ const o={x,y,yv:1,w:.6}; obs.push(o); journey.obs.push(o); fit(); } else { kappa = Math.max(.6, kappa-.2); }
-      callPy('compass.coach_feedback', [r.block, r.intervention, helped]); saveJourney();
-      $('coachbox').innerHTML = `<p class="cap" style="margin-top:10px">Saved to your map. ${helped ? 'This spot now feels more reachable.' : 'The coach will try a different strategy next time, and routes will play it safer.'} Answer the checkpoint when you're ready.</p>`; };
-    $('c-yes').onclick=()=>done(true); $('c-no').onclick=()=>done(false);
+  if (!r) return {title: "Nearby works", html: ""};
+  const photos = r.photos || [], passages = r.passages || [];
+  const title = [...photos.map(p=>p.title), ...passages.map(p=>p.title)].filter(Boolean).join(" + ").slice(0, 100) || "Nearby works";
+  return {
+    title,
+    html: `<div class="near" aria-label="Nearby archive works">
+      ${photos.map(p=>`<figure class="near-item near-photo"><img src="${esc(p.src)}" alt="${esc(p.title)}"><figcaption class="near-caption"><span class="near-kind">photograph</span><strong class="near-title">${esc(p.title)}</strong><span class="near-credit">${esc(p.credit)}</span></figcaption>${voteBtns(0, p.id)}</figure>`).join('')}
+      ${passages.map(p=>`<article class="near-item near-passage"><span class="near-kind">writing</span><h3 class="near-title">${esc(p.title)}</h3><blockquote class="near-quote">${esc(p.text)}</blockquote><p class="near-credit">${esc(p.credit)}</p>${voteBtns(1, p.id)}</article>`).join('')}
+    </div>`,
   };
 }
 function voteBtns(kind, id){ if (id==null) return '';
@@ -478,36 +375,21 @@ function answer(a){
   const o = a==='love' ? {x,y,yv:1,w:2.2} : a==='closer' ? {x,y,yv:1,w:.9} : a==='no' ? {x,y,yv:0,w:2.0} : {x,y,yv:1,w:.6};
   obs.push(o); journey.obs.push(o);
   if (a==='weirder'){ kappa += .6; BETA += .4; }
-  history.push({title: current.title, ans: a, setting: current.setting});
-  journey.trail.push({title: current.title, ans: a, setting: current.setting, when: new Date().toISOString().slice(0,10)}); saveJourney();
+  history.push({title: current.title, ans: a});
+  journey.trail.push({title: current.title, ans: a, when: new Date().toISOString().slice(0,10)}); saveJourney();
   const li=document.createElement('li'); li.innerHTML=`<span>${esc(current.title)}</span><span>${a}</span>`; $('trail').appendChild(li); $('trailcard').hidden=false; $('trail-empty').hidden=true;
   $('sQ').textContent = history.length;
   fit(); reroutes++; $('sR').textContent = reroutes;
   const from = (a==='love'||a==='closer') ? c : anim.start;   // move forward only when the step felt right
   $('status').textContent = a==='no' ? 'Dead end. Raising the cost of that area and replanning…' : a==='weirder' ? 'Going stranger: favouring emptier, riskier ground…' : 'Noted. Moving forward and replanning…';
   $('cp').innerHTML = `<div class="tag">Checkpoint</div><h2>Replanning…</h2><p class="imgline">The model updated. Watch the land reshape and the routes regrow on the map.</p>`;
-  current=null; plan(from); go('map');
+  current=null; anim.arrived=false; plan(from); go('map');
 }
 function arrive(s){
   anim.arrived = true; const end = s.path[s.path.length-1];
-  journey.paths.push(s.path.filter((c,k)=>k%2===0 || k===s.path.length-1).map(cellXY)); journey.paths = journey.paths.slice(-12); saveJourney(); anim.cp = end; const bl = blendAt(end), setting = settingFor(bl);
-  $('status').textContent = `Arrived. The fog along your route is down to ${(routeFog(s.path)*100).toFixed(0)}%.`;
-  $('cp').innerHTML = `<div class="tag">Destination · no existing work lives here</div><h2 class="thinking">Rendering the work only you would make…</h2>`;
-  Promise.all([words(bl, setting, history), nearest(end)]).then(([j])=>{
-    $('cp').innerHTML = `<div class="tag">Destination · no existing work lives here</div>
-      <div class="cpgrid">
-      <div><div class="col-h">The work only you would make</div><h2>${esc(j.title)}</h2><div class="setting">${esc(j.setting||setting)}</div>
-        <canvas class="sketch" id="sk"></canvas></div>
-      <div><div class="col-h">Your assignment</div><p class="frag">“${esc(j.line)}”</p>
-        <div class="assign"><p><b>Photo:</b> ${esc(j.image)} Find its echo where you live, in ${esc($('here').value)}. Shoot 8 frames.</p>
-        <p><b>Writing:</b> Write 300 words set in ${esc(j.setting||setting)}, about ${esc($('mind').value)}.</p></div></div>
-      <div><div class="col-h">Next</div><div class="answers" style="grid-template-columns:1fr"><button class="ans" id="a-again" type="button">Search again from here</button><button class="ans" id="a-reset" type="button">Start over</button></div></div>
-      </div>`;
-    showCp();
-    paint($('sk'), bl, end*13);
-    $('a-again').onclick=()=>{ anim.arrived=false; kappa+=.3; plan(end); go('map'); };
-    $('a-reset').onclick=start;
-  });
+  journey.paths.push(s.path.filter((c,k)=>k%2===0 || k===s.path.length-1).map(cellXY)); journey.paths = journey.paths.slice(-12); saveJourney(); anim.cp = end;
+  const status = `Arrived. The fog along your route is down to ${(routeFog(s.path)*100).toFixed(0)}%.`;
+  ask(end, "Destination collection", status);
 }
 function start(){
   journey.sessions = (journey.sessions||0) + 1; saveJourney();
