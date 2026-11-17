@@ -111,10 +111,10 @@ async function main() {
           .map((it) => [dot(it.vec, q), it]).sort((a, b) => b[0] - a[0]).slice(0, 2).map(([, it]) => it);
         shownPhotos.push(...photos.map((p) => p.index));
         shownPhotos.splice(0, Math.max(0, shownPhotos.length - 30));
-        const credit = (it) => [it.creator, it.title, it.date].filter(Boolean).join(", ") + " - " + it.source;
+        const credit = (it) => [it.creator, it.date, it.source].filter(Boolean).join(" · ");
         return {
-          photos: photos.map((it) => ({ src: it.img, credit: credit(it), id: it.index })),
-          passages: passages.map((it) => ({ text: it.text.split(/\s+/).slice(0, 55).join(" ") + "…", credit: credit(it), id: it.index })),
+          photos: photos.map((it) => ({ src: it.img, title: it.title || "Untitled photograph", credit: credit(it), id: it.index })),
+          passages: passages.map((it) => ({ text: it.text.split(/\s+/).slice(0, 55).join(" ") + "…", title: it.title || "Untitled passage", credit: credit(it), id: it.index })),
         };
       },
       // On/off track trains the same taste model as the feed.

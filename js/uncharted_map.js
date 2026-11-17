@@ -403,19 +403,19 @@ async function ask(cell){
   current = {cell, bl, ...j};
   $('cp').innerHTML = `<div class="tag">Checkpoint ${history.length+1} · ${bl.map(b=>b.t.n+' '+(b.w*100).toFixed(0)+'%').join(' · ')}</div>
     <div class="cpgrid">
-    <div><div class="col-h">What the Compass imagines here</div>
+    <div class="cp-imagined"><div class="col-h">What the Compass imagines here</div>
       <h2>${esc(j.title)}</h2><div class="setting">${esc(j.setting||setting)}</div>
       <canvas class="sketch" id="sk"></canvas><div class="cap" id="skcap"></div>
       <p class="frag">“${esc(j.line)}”</p><p class="imgline">${esc(j.image)}</p></div>
-    <div><div class="col-h">What already exists nearby · mark each one</div>${near || '<p class="imgline">No archive data loaded yet.</p>'}</div>
-    <div><div class="col-h">How do you feel about this spot?</div>
-    <div class="answers">
+    <div class="cp-nearby"><div class="col-h">Nearby work · mark each piece</div>${near || '<p class="imgline">No archive data loaded yet.</p>'}</div>
+    <div class="cp-feedback"><div class="col-h">How do you feel about this spot?</div>
+    <div class="cp-feedback-actions"><div class="answers">
       <button class="ans" id="a-love" type="button">Love it<kbd>1</kbd></button>
       <button class="ans" id="a-closer" type="button">Closer<kbd>2</kbd></button>
       <button class="ans" id="a-no" type="button">Not me<kbd>3</kbd></button>
       <button class="ans" id="a-weird" type="button">Weirder<kbd>4</kbd></button>
       <button class="ans stuck" id="a-stuck" type="button">I'm stuck here</button>
-    </div><div id="coachbox"></div></div></div>`;
+    </div><div id="coachbox"></div></div></div></div>`;
   showCp();
   $('skcap').textContent = paint($('sk'), bl, cell*7+history.length);
   $('a-love').onclick=()=>answer('love'); $('a-closer').onclick=()=>answer('closer'); $('a-no').onclick=()=>answer('no'); $('a-weird').onclick=()=>answer('weirder'); $('a-stuck').onclick=stuck;
@@ -427,8 +427,10 @@ async function nearest(cell){
   const r = await callPy('compass.peek', [[...ph, ...wr].map(w=>[w.kind, w.id])]);
   lastPhotos = (r && r.photos) || [];
   if (!r) return '';
-  return `<div class="near">${(r.photos||[]).map(p=>`<figure><img src="${p.src}" alt=""><figcaption>${esc(p.credit)}</figcaption>${voteBtns(0, p.id)}</figure>`).join('')}</div>
-    ${(r.passages||[]).map(p=>`<p class="imgline" style="font-family:var(--serif);font-weight:400;letter-spacing:0;font-size:17px;font-style:italic;color:var(--ink)">${esc(p.text)}</p><div class="cap">${esc(p.credit)}</div>${voteBtns(1, p.id)}`).join('')}`;
+  return `<div class="near" aria-label="Nearby archive works">
+    ${(r.photos||[]).map(p=>`<figure class="near-item near-photo"><img src="${esc(p.src)}" alt="${esc(p.title)}"><figcaption class="near-caption"><span class="near-kind">photograph</span><strong class="near-title">${esc(p.title)}</strong><span class="near-credit">${esc(p.credit)}</span></figcaption>${voteBtns(0, p.id)}</figure>`).join('')}
+    ${(r.passages||[]).map(p=>`<article class="near-item near-passage"><span class="near-kind">writing</span><h3 class="near-title">${esc(p.title)}</h3><blockquote class="near-quote">${esc(p.text)}</blockquote><p class="near-credit">${esc(p.credit)}</p>${voteBtns(1, p.id)}</article>`).join('')}
+  </div>`;
 }
 const BLOCKS = {motivation:"I can't get started", inspiration:"I don't know what to make", confidence:"I'm worried it won't be good"};
 function stuck(){
