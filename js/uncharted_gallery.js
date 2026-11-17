@@ -52,7 +52,30 @@ function diverse(items, count, scoreOf, excluded = new Set()) {
   return selected;
 }
 
-export function initGallery(items, model) {
+function environmentFor(theme) {
+  const name = theme?.n?.toLowerCase() || "";
+  if (["pastoral", "cottagecore", "solarpunk", "fairy tale", "folk horror", "southern gothic", "romanticism"].includes(name)) return "meadow";
+  if (["maritime", "greek myth"].includes(name)) return "open-water";
+  if (["film noir", "cyberpunk", "documentary", "harlem renaissance", "brutalism", "dystopia", "urban decay", "coming of age"].includes(name)) return "city";
+  if (["cosmic", "afrofuturism"].includes(name)) return "cosmos";
+  if (name === "desert southwest") return "desert";
+  if (["surrealism", "magical realism", "vaporwave"].includes(name)) return "dream";
+  if (name === "americana") return "open-road";
+  return "gallery";
+}
+
+const ENVIRONMENT_LABELS = {
+  meadow: "MEADOW",
+  "open-water": "OPEN WATER",
+  city: "CITY",
+  cosmos: "COSMOS",
+  desert: "DESERT",
+  dream: "DREAMSCAPE",
+  "open-road": "OPEN ROAD",
+  gallery: "GALLERY",
+};
+
+export function initGallery(items, model, themes = []) {
   const track = $("#gallery-track");
   const stage = $("#gallery-stage");
   const journey = $("#gallery-journey");
@@ -83,6 +106,8 @@ export function initGallery(items, model) {
   let sceneElements = [];
   let lookYaw = 0;
   let lookPitch = 0;
+  let activeRoom = -1;
+  let positionedWidth = 0;
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
   tip.textContent = finePointer
@@ -90,45 +115,121 @@ export function initGallery(items, model) {
     : "Scroll to walk · tap a work to learn about it.";
 
   function updateIntro() {
-    intro.textContent = model.count >= 8
-      ? `Built from ${model.count} choices in your inspiration profile. Each room uses the same on-device taste model as your feed.`
-      : "This is a preview. Choose at least 8 works in Inspiration to make the gallery reflect your taste.";
+    if (model.count >= 8 && model.liked.length) {
+      intro.textContent = `Built from ${model.count} choices in your inspiration profile. CLIP compares your liked works with 26 curated themes; related interests share a room, and its colors follow the strongest theme.`;
+    } else if (model.count >= 8) {
+      intro.textContent = `Built from ${model.count} choices in your inspiration profile. Mark a few works as "Drawn to this" to reveal rooms shaped around their closest themes.`;
+    } else {
+      intro.textContent = "This is a preview. As you choose works in Inspiration, CLIP will compare your picks with 26 curated themes and shape each room around them.";
+    }
   }
 
   function makeRooms() {
-    const liked = [...model.liked].sort((a, b) => model.score(b) - model.score(a));
+    const liked = uniqueWorks([...model.liked].sort((a, b) => model.score(b) - model.score(a)), model.liked.length);
     const labeled = new Set(model.labels.keys());
-    const first = uniqueWorks(liked.length ? liked : model.pick(12), 4);
-    const used = new Set([...labeled, ...first.map((item) => item.id)]);
-    const usedTitles = new Set(first.map(workKey));
+    const availableThemes = themes.filter((theme) => theme.vec?.length === model.dim);
+    const rooms = [];
+    let leadTheme = null;
+
+    if (liked.length && availableThemes.length) {
+      const environments = new Map();
+      for (const item of liked) {
+        let closest = null, similarity = -Infinity;
+        for (const theme of availableThemes) {
+          const value = dot(item.vec, theme.vec);
+          if (value > similarity) { closest = theme; similarity = value; }
+        }
+        if (!closest) continue;
+        const environment = environmentFor(closest);
+        if (!environments.has(environment)) environments.set(environment, { environment, themes: new Map(), affinity: 0 });
+        const group = environments.get(environment);
+        if (!group.themes.has(closest.n)) group.themes.set(closest.n, { theme: closest, works: [] });
+        group.themes.get(closest.n).works.push(item);
+        group.affinity += similarity;
+      }
+
+      const themedRooms = [...environments.values()].map((group) => {
+        const themeGroups = [...group.themes.values()].sort((a, b) => b.works.length - a.works.length);
+        const dominant = themeGroups[0];
+        const works = themeGroups.flatMap(({ works: themeWorks }) => themeWorks.sort((a, b) => model.score(b) - model.score(a)));
+        const names = themeGroups.map(({ theme }) => theme.n);
+        return {
+          environment: group.environment,
+          theme: dominant.theme,
+          title: dominant.theme.n,
+          note: `${works.length} ${works.length === 1 ? "work" : "works"} you chose · ${names.join(" / ")}. ${dominant.theme.desc}.`,
+          works,
+          affinity: group.affinity / works.length,
+        };
+      }).sort((a, b) => b.works.length - a.works.length || b.affinity - a.affinity);
+
+      leadTheme = themedRooms[0]?.theme || null;
+      rooms.push(...themedRooms);
+    } else {
+      const first = uniqueWorks(liked.length ? liked : model.pick(12), 4);
+      rooms.push({
+        title: liked.length ? "The works you brought" : "A first look",
+        note: liked.length
+          ? "Your picks, returned to you at gallery scale."
+          : "Choose works in Inspiration to make this room reflect your taste.",
+        works: first,
+      });
+    }
+
+    const used = new Set([...labeled, ...liked.map((item) => item.id)]);
+    const usedTitles = new Set(liked.map(workKey));
     const echoes = uniqueWorks(model.pick(24, { exclude: used }), 4, usedTitles);
     echoes.forEach((item) => { used.add(item.id); usedTitles.add(workKey(item)); });
+    rooms.push({
+      title: "Where the echoes lead",
+      note: "The Compass finds likely matches, while varying the works so the room doesn't repeat itself.",
+      works: echoes,
+      theme: leadTheme,
+      environment: leadTheme ? environmentFor(leadTheme) : undefined,
+    });
 
     const candidates = items.filter((item) => !used.has(item.id) && !usedTitles.has(workKey(item)));
     const edge = uniqueWorks(diverse(candidates, Math.min(12, candidates.length), (item) => {
       const boundary = 1 - Math.abs(2 * model.prob(item) - 1);
       return model.uncertainty(item) * (0.65 + boundary * 0.35);
     }), 4);
+    rooms.push({
+      title: "At the edge of your taste",
+      note: "These works sit near the model's uncertain boundary. Your reaction helps it learn.",
+      works: edge,
+      theme: leadTheme,
+      environment: leadTheme ? environmentFor(leadTheme) : undefined,
+    });
+    return rooms.filter((room) => room.works.length);
+  }
 
-    return [
-      {
-        title: liked.length ? "The works you brought" : "A first look",
-        note: liked.length
-          ? "Your picks, returned to you at gallery scale."
-          : "Choose works in Inspiration to make this room reflect your taste.",
-        works: first,
-      },
-      {
-        title: "Where the echoes lead",
-        note: "The Compass finds likely matches, while varying the works so the room doesn't repeat itself.",
-        works: echoes,
-      },
-      {
-        title: "At the edge of your taste",
-        note: "These works sit near the model's uncertain boundary. Your reaction helps it learn.",
-        works: edge,
-      },
-    ].filter((room) => room.works.length);
+  function applyRoomAtmosphere() {
+    const room = rooms[roomIndex];
+    if (!room || activeRoom === roomIndex) return;
+    activeRoom = roomIndex;
+    const palette = room.theme?.pal?.filter((color) => /^#[0-9a-f]{6}$/i.test(color)) || [];
+    const colors = palette.length >= 4 ? palette : ["#292523", "#51463b", "#c9b48f", "#171619"];
+    track.dataset.environment = room.environment || environmentFor(room.theme);
+    stage.dataset.environment = track.dataset.environment;
+    track.style.setProperty("--scene-primary", colors[0]);
+    track.style.setProperty("--scene-secondary", colors[1]);
+    track.style.setProperty("--scene-accent", colors[2]);
+    track.style.setProperty("--scene-dark", colors[3]);
+    const rgba = (color, opacity) => `rgba(${[1, 3, 5].map((index) => parseInt(color.slice(index, index + 2), 16)).join(", ")}, ${opacity})`;
+    stage.style.setProperty("--scene-glow", rgba(colors[0], 0.22));
+    stage.style.setProperty("--scene-horizon", rgba(colors[2], 0.08));
+  }
+
+  function positionWorks() {
+    const width = stage.clientWidth;
+    if (width === positionedWidth) return;
+    positionedWidth = width;
+    const sideOffset = width < 820 ? width * 0.15 : Math.min(330, width * 0.24);
+    workElements.forEach((element) => {
+      const side = Number(element.dataset.side);
+      const depth = Number(element.dataset.depth);
+      element.style.transform = `translate3d(${side * sideOffset}px, -38px, ${-depth}px) rotateY(${side < 0 ? 56 : -56}deg)`;
+    });
   }
 
   function updateControls() {
@@ -139,11 +240,12 @@ export function initGallery(items, model) {
 
   function updateJourney() {
     if (!rooms.length || !stage.offsetHeight) return;
+    positionWorks();
     const stickyTop = parseFloat(getComputedStyle(stage).top) || 67;
     const travel = Math.max(1, journey.offsetHeight - stage.offsetHeight);
     const scrollProgress = Math.max(0, Math.min(1, (stickyTop - journey.getBoundingClientRect().top) / travel));
     const cameraDistance = scrollProgress * cameraTravel;
-    track.style.transform = `translateZ(${cameraDistance}px) rotateY(${lookYaw}deg) rotateX(${lookPitch}deg)`;
+    track.style.transform = `rotateY(${lookYaw}deg) rotateX(${lookPitch}deg) translateZ(${cameraDistance}px)`;
     sceneElements.forEach(({ element, depth, fadeStart, fadeEnd }) => {
       const distance = depth - cameraDistance;
       const fadeIn = Math.max(0, Math.min(1, (fadeStart - distance) / (fadeStart - fadeEnd)));
@@ -154,7 +256,7 @@ export function initGallery(items, model) {
     });
     workElements.forEach((element) => {
       const distance = Number(element.dataset.depth) - cameraDistance;
-      const fadeIn = Math.max(0, Math.min(1, (3000 - distance) / 700));
+      const fadeIn = Math.max(0, Math.min(1, (2100 - distance) / 500));
       const fadeOut = Math.max(0, Math.min(1, (distance + 150) / 150));
       const opacity = Math.min(fadeIn, fadeOut);
       const visible = opacity > 0.1;
@@ -165,6 +267,7 @@ export function initGallery(items, model) {
       element.tabIndex = visible && distance < 2400 ? 0 : -1;
     });
     roomIndex = roomStarts.reduce((current, start, index) => cameraDistance + 1 >= start ? index : current, 0);
+    applyRoomAtmosphere();
     updateControls();
   }
 
@@ -182,7 +285,7 @@ export function initGallery(items, model) {
     button.type = "button";
     button.setAttribute("aria-label", `Learn about ${title}, by ${creatorOf(item)}`);
     button.dataset.depth = String(depth);
-    button.style.transform = `translate3d(${side * 330}px, -38px, ${-depth}px) rotateY(${side < 0 ? 56 : -56}deg)`;
+    button.dataset.side = String(side);
     button.tabIndex = -1;
     const art = node("span", "gallery-art");
     if (item.kind === "photo") {
@@ -210,13 +313,13 @@ export function initGallery(items, model) {
     roomStarts = [];
     workElements = [];
     sceneElements = [];
+    positionedWidth = 0;
     track.replaceChildren();
-    track.append(
-      node("div", "gallery-wall left"),
-      node("div", "gallery-wall right"),
-      node("div", "gallery-floor"),
-      node("div", "gallery-ceiling"),
-    );
+    const leftWall = node("div", "gallery-wall left");
+    const rightWall = node("div", "gallery-wall right");
+    const floor = node("div", "gallery-floor");
+    const ceiling = node("div", "gallery-ceiling");
+    track.append(leftWall, rightWall, floor, ceiling);
 
     let depth = 0;
     let workIndex = 0;
@@ -238,7 +341,7 @@ export function initGallery(items, model) {
       sign.style.transform = `translate3d(0, 0, ${-(roomStart + 220)}px)`;
       sceneElements.push({ element: sign, depth: roomStart + 220, fadeStart: 1500, fadeEnd: 700 });
       sign.append(
-        node("small", "", `ROOM ${String(index + 1).padStart(2, "0")}`),
+        node("small", "", `${ENVIRONMENT_LABELS[room.environment || environmentFor(room.theme)]} · ROOM ${String(index + 1).padStart(2, "0")}`),
         node("strong", "", room.title),
         node("span", "", room.note),
       );
@@ -251,14 +354,24 @@ export function initGallery(items, model) {
         workElements.push(artwork);
         workIndex += 1;
       });
-      depth += room.works.length * 500 + 550;
+      depth += Math.max(room.works.length * 500 + 550, 2400);
     }
     corridorLength = Math.max(1200, depth + 800);
     cameraTravel = Math.max(1, corridorLength - 1000);
+    const surfaceLength = Math.max(8600, corridorLength + 800);
+    leftWall.style.width = rightWall.style.width = `${surfaceLength}px`;
+    leftWall.style.left = `${-350 - surfaceLength / 2}px`;
+    rightWall.style.left = `${350 - surfaceLength / 2}px`;
+    leftWall.style.transform = `translateZ(${-(surfaceLength / 2 - 400)}px) rotateY(90deg)`;
+    rightWall.style.transform = `translateZ(${-(surfaceLength / 2 - 400)}px) rotateY(-90deg)`;
+    floor.style.height = ceiling.style.height = `${surfaceLength}px`;
     const farWall = node("div", "gallery-far-wall");
     farWall.style.transform = `translateZ(${-corridorLength}px)`;
     track.append(farWall);
     journey.style.height = `calc(${cameraTravel}px + 100dvh)`;
+    activeRoom = -1;
+    applyRoomAtmosphere();
+    positionWorks();
     updateControls();
     scheduleJourneyUpdate();
   }

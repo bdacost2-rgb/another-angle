@@ -148,7 +148,7 @@ async function main() {
         return { ok: true };
       },
     };
-    initGallery(items, T);
+    initGallery(items, T, A.themes);
   }
   if (!(A && A.themes.length)) initGallery([], null);
   const s = document.createElement("script");
