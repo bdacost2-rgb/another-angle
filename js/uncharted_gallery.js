@@ -76,7 +76,18 @@ export function initGallery(items, model) {
   let rooms = [];
   let roomIndex = 0;
   let scrollFrame = 0;
+  let corridorLength = 1;
+  let cameraTravel = 1;
+  let roomStarts = [];
+  let workElements = [];
+  let sceneElements = [];
+  let lookYaw = 0;
+  let lookPitch = 0;
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+  tip.textContent = finePointer
+    ? "Scroll to walk · move your cursor to look around · select a work."
+    : "Scroll to walk · tap a work to learn about it.";
 
   function updateIntro() {
     intro.textContent = model.count >= 8
@@ -131,27 +142,29 @@ export function initGallery(items, model) {
     const stickyTop = parseFloat(getComputedStyle(stage).top) || 67;
     const travel = Math.max(1, journey.offsetHeight - stage.offsetHeight);
     const scrollProgress = Math.max(0, Math.min(1, (stickyTop - journey.getBoundingClientRect().top) / travel));
-    const position = scrollProgress * Math.max(0, rooms.length - 1);
-    rooms.forEach((room, index) => {
-      const element = track.children[index];
-      const distance = index - position;
-      const proximity = Math.abs(distance);
-      const opacity = Math.max(0, 1 - proximity * 1.15);
-      const offsetX = Math.max(-140, Math.min(140, distance * 44));
-      const depth = -Math.min(proximity * 460, 1100);
-      const scale = 1 - Math.min(proximity * 0.12, 0.45);
-      element.style.transform = reducedMotion.matches
-        ? "none"
-        : `translate3d(${offsetX}px, 0, ${depth}px) scale(${scale})`;
+    const cameraDistance = scrollProgress * cameraTravel;
+    track.style.transform = `translateZ(${cameraDistance}px) rotateY(${lookYaw}deg) rotateX(${lookPitch}deg)`;
+    sceneElements.forEach(({ element, depth, fadeStart, fadeEnd }) => {
+      const distance = depth - cameraDistance;
+      const fadeIn = Math.max(0, Math.min(1, (fadeStart - distance) / (fadeStart - fadeEnd)));
+      const fadeOut = Math.max(0, Math.min(1, (distance + 100) / 400));
+      const opacity = Math.min(fadeIn, fadeOut);
       element.style.opacity = String(opacity);
       element.style.visibility = opacity > 0.01 ? "visible" : "hidden";
-      element.style.pointerEvents = proximity < 0.5 ? "auto" : "none";
-      element.setAttribute("aria-hidden", String(proximity >= 0.5));
-      element.querySelectorAll("button").forEach((button) => {
-        button.tabIndex = proximity < 0.5 ? 0 : -1;
-      });
     });
-    roomIndex = Math.round(position);
+    workElements.forEach((element) => {
+      const distance = Number(element.dataset.depth) - cameraDistance;
+      const fadeIn = Math.max(0, Math.min(1, (3000 - distance) / 700));
+      const fadeOut = Math.max(0, Math.min(1, (distance + 150) / 150));
+      const opacity = Math.min(fadeIn, fadeOut);
+      const visible = opacity > 0.1;
+      element.style.opacity = String(opacity);
+      element.style.visibility = visible ? "visible" : "hidden";
+      element.style.pointerEvents = visible && distance > 100 && distance < 2400 ? "auto" : "none";
+      element.setAttribute("aria-hidden", String(!visible));
+      element.tabIndex = visible && distance < 2400 ? 0 : -1;
+    });
+    roomIndex = roomStarts.reduce((current, start, index) => cameraDistance + 1 >= start ? index : current, 0);
     updateControls();
   }
 
@@ -163,11 +176,14 @@ export function initGallery(items, model) {
     });
   }
 
-  function workButton(item) {
+  function workButton(item, depth, side) {
     const title = titleOf(item);
     const button = node("button", `gallery-work${item.kind === "text" ? " is-text" : ""}`);
     button.type = "button";
     button.setAttribute("aria-label", `Learn about ${title}, by ${creatorOf(item)}`);
+    button.dataset.depth = String(depth);
+    button.style.transform = `translate3d(${side * 330}px, -38px, ${-depth}px) rotateY(${side < 0 ? 56 : -56}deg)`;
+    button.tabIndex = -1;
     const art = node("span", "gallery-art");
     if (item.kind === "photo") {
       const image = node("img");
@@ -191,21 +207,58 @@ export function initGallery(items, model) {
     updateIntro();
     rooms = makeRooms();
     roomIndex = Math.min(roomIndex, Math.max(0, rooms.length - 1));
-    journey.style.height = `${Math.max(1, rooms.length) * 140}dvh`;
+    roomStarts = [];
+    workElements = [];
+    sceneElements = [];
     track.replaceChildren();
+    track.append(
+      node("div", "gallery-wall left"),
+      node("div", "gallery-wall right"),
+      node("div", "gallery-floor"),
+      node("div", "gallery-ceiling"),
+    );
+
+    let depth = 0;
+    let workIndex = 0;
     for (const [index, room] of rooms.entries()) {
-      const section = node("section", "gallery-room");
-      section.setAttribute("aria-label", `Room ${index + 1}: ${room.title}`);
-      section.append(node("span", "gallery-wing left"), node("span", "gallery-wing right"));
-      const content = node("div", "gallery-room-content");
-      const heading = node("div", "gallery-room-heading");
-      heading.append(node("h3", "", room.title), node("p", "", room.note));
-      const works = node("div", "gallery-works");
-      room.works.forEach((item) => works.append(workButton(item)));
-      content.append(heading, works);
-      section.append(content);
-      track.append(section);
+      const roomStart = depth;
+      roomStarts.push(roomStart);
+      if (index > 0) {
+        const portal = node("div", "gallery-portal");
+        portal.style.left = "-330px";
+        portal.style.top = "-250px";
+        portal.style.transform = `translateZ(${-roomStart}px)`;
+        sceneElements.push({ element: portal, depth: roomStart, fadeStart: 3000, fadeEnd: 800 });
+        track.append(portal);
+      }
+
+      const sign = node("div", "gallery-room-sign");
+      sign.style.left = "-210px";
+      sign.style.top = "-160px";
+      sign.style.transform = `translate3d(0, 0, ${-(roomStart + 220)}px)`;
+      sceneElements.push({ element: sign, depth: roomStart + 220, fadeStart: 1500, fadeEnd: 700 });
+      sign.append(
+        node("small", "", `ROOM ${String(index + 1).padStart(2, "0")}`),
+        node("strong", "", room.title),
+        node("span", "", room.note),
+      );
+      track.append(sign);
+
+      room.works.forEach((item, itemIndex) => {
+        const side = workIndex % 2 === 0 ? -1 : 1;
+        const artwork = workButton(item, roomStart + 650 + itemIndex * 500, side);
+        track.append(artwork);
+        workElements.push(artwork);
+        workIndex += 1;
+      });
+      depth += room.works.length * 500 + 550;
     }
+    corridorLength = Math.max(1200, depth + 800);
+    cameraTravel = Math.max(1, corridorLength - 1000);
+    const farWall = node("div", "gallery-far-wall");
+    farWall.style.transform = `translateZ(${-corridorLength}px)`;
+    track.append(farWall);
+    journey.style.height = `calc(${cameraTravel}px + 100dvh)`;
     updateControls();
     scheduleJourneyUpdate();
   }
@@ -307,7 +360,7 @@ export function initGallery(items, model) {
     const travel = Math.max(0, journey.offsetHeight - stage.offsetHeight);
     const journeyTop = journey.getBoundingClientRect().top + window.scrollY;
     const start = journeyTop - stickyTop;
-    const target = start + travel * targetIndex / (rooms.length - 1);
+    const target = start + travel * roomStarts[targetIndex] / cameraTravel;
     window.scrollTo({ top: target, behavior: reducedMotion.matches ? "auto" : "smooth" });
   }
 
@@ -323,15 +376,17 @@ export function initGallery(items, model) {
       changeRoom(roomIndex - 1);
     }
   });
-  let touchStart = null;
-  stage.addEventListener("pointerdown", (event) => {
-    touchStart = event.target.closest("button") ? null : event.clientX;
+  stage.addEventListener("pointermove", (event) => {
+    if (event.pointerType !== "mouse" || !finePointer || reducedMotion.matches) return;
+    const bounds = stage.getBoundingClientRect();
+    lookYaw = (0.5 - (event.clientX - bounds.left) / bounds.width) * 7;
+    lookPitch = ((event.clientY - bounds.top) / bounds.height - 0.5) * 2;
+    scheduleJourneyUpdate();
   });
-  stage.addEventListener("pointerup", (event) => {
-    if (touchStart == null) return;
-    const delta = event.clientX - touchStart;
-    touchStart = null;
-    if (Math.abs(delta) > 60) changeRoom(roomIndex + (delta < 0 ? 1 : -1));
+  stage.addEventListener("pointerleave", () => {
+    lookYaw = 0;
+    lookPitch = 0;
+    scheduleJourneyUpdate();
   });
   dialog.addEventListener("click", (event) => {
     if (event.target === dialog) dialog.close();
