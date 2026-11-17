@@ -82,33 +82,32 @@ async function main() {
       mine: mine.length,
     };
 
-    const shownPhotos = [], offTrack = new Set();
     window.UNCHARTED_BRIDGE = {
-      // The real works closest in meaning to a checkpoint: the theme blend there + the nearest passage.
-      "compass.peek": (ids) => {
+      // The real works closest in meaning to a checkpoint, excluding works already shown.
+      "compass.peek": (ids, seenIds = []) => {
+        const seen = new Set(Array.isArray(seenIds) ? seenIds : []);
         const pts = ids.map(([, i]) => items[i]).filter(Boolean);
         const cx = pts.reduce((s, p) => s + p.x, 0) / (pts.length || 1), cy = pts.reduce((s, p) => s + p.y, 0) / (pts.length || 1);
         const tw = themes.map((t) => Math.exp(-((cx - t.x) ** 2 + (cy - t.y) ** 2) / (2 * 0.12 ** 2)));
         const q = new Float32Array(A.dim);
         themes.forEach((t, k) => { for (let d = 0; d < A.dim; d++) q[d] += tw[k] * t.vec[d]; });
         normalize(q);
-        const passages = ids.filter(([k]) => k === 1).map(([, i]) => items[i]).filter(Boolean);
-        if (passages.length) { for (let d = 0; d < A.dim; d++) q[d] += 0.7 * passages[0].vec[d]; normalize(q); }
-        const photos = items.filter((it) => it.kind === "photo" && !shownPhotos.includes(it.index) && !offTrack.has(it.index))
+        const nearbyPassage = ids.filter(([kind, id]) => kind === 1 && !seen.has(id)).map(([, id]) => items[id]).find(Boolean);
+        const passage = nearbyPassage || items.filter((it) => it.kind === "text" && !seen.has(it.index))
+          .map((it) => [dot(it.vec, q), it]).sort((a, b) => b[0] - a[0])[0]?.[1];
+        if (passage) { for (let d = 0; d < A.dim; d++) q[d] += 0.7 * passage.vec[d]; normalize(q); }
+        const photos = items.filter((it) => it.kind === "photo" && !seen.has(it.index))
           .map((it) => [dot(it.vec, q), it]).sort((a, b) => b[0] - a[0]).slice(0, 2).map(([, it]) => it);
-        shownPhotos.push(...photos.map((p) => p.index));
-        shownPhotos.splice(0, Math.max(0, shownPhotos.length - 30));
         const credit = (it) => [it.creator, it.date, it.source].filter(Boolean).join(" · ");
         return {
           photos: photos.map((it) => ({ src: it.img, title: it.title || "Untitled photograph", credit: credit(it), id: it.index })),
-          passages: passages.map((it) => ({ text: it.text.split(/\s+/).slice(0, 55).join(" ") + "…", title: it.title || "Untitled passage", credit: credit(it), id: it.index })),
+          passages: passage ? [{ text: passage.text.split(/\s+/).slice(0, 55).join(" ") + "…", title: passage.title || "Untitled passage", credit: credit(passage), id: passage.index }] : [],
         };
       },
       // On/off track trains the same taste model as the feed.
       "compass.vote": (kind, i, good) => {
         const it = items[i];
         if (it) T.label(it, good ? 1 : 0);
-        if (!good && kind === 0) offTrack.add(i);
         return { ok: true };
       },
     };

@@ -292,9 +292,10 @@ function flag(name){ if (pane!==name) document.querySelector(`.rail [data-pane="
 document.querySelectorAll('.rail [data-pane]').forEach(b=>b.onclick=()=>go(b.dataset.pane));
 document.addEventListener('click', e=>{ const a=e.target.closest('[data-go-pane]'); if (a){ e.preventDefault(); go(a.dataset.goPane); } });
 // ---------- your saved identity: answers, routes and blocks carry across sessions ----------
-const BLANK = {obs:[], trail:[], paths:[], blocks:[], sessions:0};
+const BLANK = {obs:[], trail:[], paths:[], blocks:[], sessions:0, seenWorkIds:[]};
 let journey = (DATA && DATA.journey) || (()=>{ try { return JSON.parse(localStorage.getItem('compass-journey')); } catch(e) { return null; } })() || BLANK;
 journey = {...BLANK, ...journey};
+if (!Array.isArray(journey.seenWorkIds)) journey.seenWorkIds = [];
 function saveJourney(){ try { localStorage.setItem('compass-journey', JSON.stringify(journey)); } catch(e) {} callPy('compass.save', [journey]); }
 const cellXY = c => [(c%W+.5)/W, (((c/W)|0)+.5)/H];
 function routeFog(path){ if(!path||!path.length) return 1; let m=0; for (const c of path) m+=Math.min(1,SD[c]/SD0); return m/path.length; }
@@ -346,9 +347,13 @@ async function nearest(cell){
   if (!DATA) return {title: "Nearby works", html: ""};
   const x=(cell%W+.5)/W, y=(((cell/W)|0)+.5)/H, d=w=>(w.x-x)**2+(w.y-y)**2;
   const ph = WORKS.filter(w=>!w.kind).sort((a,b)=>d(a)-d(b)).slice(0,2), wr = WORKS.filter(w=>w.kind).sort((a,b)=>d(a)-d(b)).slice(0,1);
-  const r = await callPy('compass.peek', [[...ph, ...wr].map(w=>[w.kind, w.id])]);
+  const r = await callPy('compass.peek', [[...ph, ...wr].map(w=>[w.kind, w.id]), journey.seenWorkIds]);
   if (!r) return {title: "Nearby works", html: ""};
   const photos = r.photos || [], passages = r.passages || [];
+  const shownIds = [...photos, ...passages].map(p=>p.id).filter(Number.isInteger);
+  if (!shownIds.length) return {title: "No new works", html: '<p class="imgline">You have seen all available archive works.</p>'};
+  journey.seenWorkIds = [...new Set([...journey.seenWorkIds, ...shownIds])];
+  saveJourney();
   const title = [...photos.map(p=>p.title), ...passages.map(p=>p.title)].filter(Boolean).join(" + ").slice(0, 100) || "Nearby works";
   return {
     title,
