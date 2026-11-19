@@ -169,12 +169,55 @@ cv.addEventListener('pointerdown', e=>{ ptrPos(e); ptr.down=true; ptr.drag=false
 cv.addEventListener('pointermove', e=>{ const dx=e.clientX-ptr.sx, dy=e.clientY-ptr.sy; ptrPos(e);
   if (ptr.down){ if (!ptr.drag && Math.hypot(dx,dy)>4) ptr.drag=true;
     if (ptr.drag){ cam.yaw+=dx*.006; cam.vyaw=dx*.006; cam.tilt=Math.min(1.3,Math.max(.12,cam.tilt+dy*.004)); ptr.sx=e.clientX; ptr.sy=e.clientY; cv.classList.add('turning'); } } });
-function ptrUp(e){ if (ptr.down && !ptr.drag && ptr.pick>=0){ const [u,v]=cellUV(ptr.pick); ripples.push({u,v,t:performance.now()}); if (ripples.length>6) ripples.shift(); }
+function ptrUp(e){ const room = ptr.down && !ptr.drag ? roomAt(ptr.x, ptr.y) : null;
+  if (room){ ptr.down=false; ptr.on=false; cv.classList.remove('turning'); enterRoom(room.index); return; }
+  if (ptr.down && !ptr.drag && ptr.pick>=0){ const [u,v]=cellUV(ptr.pick); ripples.push({u,v,t:performance.now()}); if (ripples.length>6) ripples.shift(); }
   ptr.down=false; ptr.drag=false; cv.classList.remove('turning'); if (e.pointerType==='touch') ptr.on=false; }
 cv.addEventListener('pointerup', ptrUp); cv.addEventListener('pointercancel', ptrUp);
 cv.addEventListener('pointerleave', ()=>{ if (!ptr.down) ptr.on=false; });
 cv.addEventListener('dblclick', ()=>{ cam.yaw=HOME.yaw; cam.tilt=HOME.tilt; cam.vyaw=0; });
 const SANS="'Google Sans Flex', 'Helvetica Neue', Arial, sans-serif";
+const SERIF="Newsreader, Georgia, serif";
+
+// ---------- the gallery's rooms on the map, and reading the land ----------
+// Each gallery room is drawn as a constellation: its works joined by their shortest connecting tree.
+function mst(points){ const n=points.length, inTree=new Uint8Array(n), best=new Float64Array(n).fill(Infinity), from=new Int32Array(n).fill(-1), edges=[];
+  if (!n) return edges; best[0]=0;
+  for (let it=0; it<n; it++){ let u=-1; for (let i=0;i<n;i++) if(!inTree[i] && (u<0 || best[i]<best[u])) u=i;
+    inTree[u]=1; if (from[u]>=0) edges.push([from[u],u]);
+    for (let v=0; v<n; v++){ if (inTree[v]) continue; const d=Math.hypot((points[u][0]-points[v][0])*ASPECT, points[u][1]-points[v][1]); if (d<best[v]){ best[v]=d; from[v]=u; } } }
+  return edges; }
+function segDist(px,py,a,b){ const dx=b[0]-a[0], dy=b[1]-a[1], L=dx*dx+dy*dy||1, t=Math.max(0,Math.min(1,((px-a[0])*dx+(py-a[1])*dy)/L)); return Math.hypot(px-a[0]-t*dx, py-a[1]-t*dy); }
+let hoverRoom=null;
+function roomAt(x,y){ let best=null, bd=14;
+  for (const room of (window.GALLERY_ROOMS||[])){ if (!room.screen) continue;
+    room.screen.forEach(p=>{ const d=Math.hypot(p[0]-x,p[1]-y); if (d<bd){ bd=d; best=room; } });
+    room.edges.forEach(([a,b])=>{ const d=segDist(x,y,room.screen[a],room.screen[b]); if (d<Math.min(bd,7)){ bd=d; best=room; } }); }
+  return best; }
+function enterRoom(index){ go('gallery'); requestAnimationFrame(()=>window.dispatchEvent(new CustomEvent('gallery:enter-room',{detail:{index}}))); }
+// The card that follows the cursor: what this spot is like (CLIP design dials) and the works nearest to it,
+// or, over a constellation, the gallery room it belongs to.
+const tipEl=document.getElementById('map-tip'); let tipKey='';
+function tipHTML(room, cell){
+  const e=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  if (room) return `<small>${room.ring?'final gallery room':'gallery room '+String(room.index+1).padStart(2,'0')}</small><strong>${e(room.title)}</strong>`+
+    (room.signature.length?`<span class="map-tip-words">${room.signature.map(e).join(' · ')}</span>`:'')+`<span class="map-tip-cta">${room.points.length} of your works · click to walk in →</span>`;
+  const describe=(window.UNCHARTED_BRIDGE||{})['compass.describe']; if (!describe) return '';
+  const [u,v]=cellUV(cell), d=describe(u,v);
+  const words = d.empty ? '<span class="map-tip-words">uncharted · no works here yet</span>' : d.words.length ? `<span class="map-tip-words">${d.words.map(e).join(' · ')}</span>` : '<span class="map-tip-words">a mix of everything</span>';
+  const thumbs = d.works.map(w=>w.img?`<img src="${e(w.img)}" alt="" referrerpolicy="no-referrer">`:`<span class="map-tip-page">${e(w.title.slice(0,40))}</span>`).join('');
+  return `<small>${d.empty?'open ground':'this area'}</small>${words}<div class="map-tip-works">${thumbs}</div><span class="map-tip-names">nearest: ${d.works.map(w=>e(w.title.slice(0,38))).join(' · ')}</span>`;
+}
+function updateTip(){
+  if (!tipEl) return;
+  const show = ptr.on && ptr.a>.3 && !ptr.drag && !ptr.down && (hoverRoom || ptr.pick>=0) && DATA;
+  if (!show){ if (!tipEl.hidden){ tipEl.hidden=true; tipKey=''; } return; }
+  const cell=ptr.pick, key = hoverRoom ? 'r'+hoverRoom.index+hoverRoom.title : 'c'+(((cell/W)|0)>>1)+'_'+((cell%W)>>1);
+  if (key!==tipKey){ tipKey=key; tipEl.innerHTML=tipHTML(hoverRoom, cell); tipEl.classList.toggle('is-room', Boolean(hoverRoom)); }
+  tipEl.hidden=false;
+  const w=tipEl.offsetWidth, h=tipEl.offsetHeight;
+  tipEl.style.transform=`translate(${Math.round(Math.min(Math.max(8,ptr.x+22), CW-w-8))}px, ${Math.round(Math.min(Math.max(8,ptr.y+22), CH-h-8))}px)`;
+}
 
 function draw(){
   if (!CW || !CH) return;
@@ -235,6 +278,28 @@ function draw(){
   ctx.font=`500 ${fs}px ${SANS}`;
   // (the ones you chose first; a name that would sit on top of another is left out until you turn the map)
   const placed=[];
+  // gallery rooms as constellations (drawn first, so their names win the space)
+  const ROOMS = window.GALLERY_ROOMS || [];
+  for (const room of ROOMS){ if (!room.edges) room.edges=mst(room.points); room.screen=room.points.map(([x,y])=>onLand(x,y,.014)); }
+  hoverRoom = ptr.a>.01 && !ptr.drag ? roomAt(ptr.x, ptr.y) : null;
+  for (const room of [...ROOMS].sort((p,q)=>(q.minor?1:0)-(p.minor?1:0))){ if (!room.screen.length) continue; const on=room===hoverRoom, a=on?1:room.minor?.22:.5;
+    ctx.strokeStyle=`rgba(255,229,207,${a*.75})`; ctx.lineWidth=on?1.8:1; ctx.setLineDash(room.minor && !on?[2,5]:[]);
+    ctx.beginPath(); room.edges.forEach(([i,j])=>{ ctx.moveTo(room.screen[i][0],room.screen[i][1]); ctx.lineTo(room.screen[j][0],room.screen[j][1]); }); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle=`rgba(255,229,207,${a})`; room.screen.forEach(p=>{ ctx.beginPath(); ctx.arc(p[0],p[1],(on?3.6:2.6)*p[2],0,7); ctx.fill(); });
+    const cx=room.points.reduce((t,p)=>t+p[0],0)/room.points.length, cy=room.points.reduce((t,p)=>t+p[1],0)/room.points.length;
+    let li=0; room.points.forEach((p,k)=>{ if (Math.hypot(p[0]-cx,p[1]-cy) < Math.hypot(room.points[li][0]-cx,room.points[li][1]-cy)) li=k; });
+    const g=room.screen[li], top=onLand(room.points[li][0], room.points[li][1], .17), label=`${room.ring?'ring':String(room.index+1).padStart(2,'0')}  ${room.title}`;
+    ctx.font=`600 ${fs}px ${SANS}`; const tw=ctx.measureText(label).width/2+6;
+    if (room.minor && !on) continue;
+    if (!on && placed.some(q=>Math.abs(q[0]-top[0])<q[2]+tw && Math.abs(q[1]-top[1])<fs+5)) continue;
+    ctx.strokeStyle=`rgba(255,229,207,${a*.5})`; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(g[0],g[1]); ctx.lineTo(top[0],top[1]); ctx.stroke();
+    ctx.fillStyle=`rgba(255,229,207,${on?1:.85})`; ctx.fillText(label, top[0], top[1]-5); placed.push([top[0],top[1],tw]); }
+  // what the land is like: named areas from the CLIP design dials, lying flat like place names on a map
+  ctx.font=`italic 400 ${fs+3}px ${SERIF}`;
+  for (const r of (DATA && DATA.regions) || []){ const p=onLand(r.x,r.y,.02), tw=ctx.measureText(r.text).width/2+6;
+    if (placed.some(q=>Math.abs(q[0]-p[0])<q[2]+tw && Math.abs(q[1]-p[1])<fs+8)) continue; placed.push([p[0],p[1],tw]);
+    ctx.fillStyle='rgba(244,244,244,.4)'; ctx.fillText(r.text, p[0], p[1]); }
+  ctx.font=`500 ${fs}px ${SANS}`;
   [...THEMES].sort((a,b)=>(state[b.n]===1)-(state[a.n]===1)).forEach(t=>{ const g=onLand(t.x,t.y,0), p=onLand(t.x,t.y,.1), tw=ctx.measureText(t.n).width/2+6;
     if (placed.some(q=>Math.abs(q[0]-p[0])<q[2]+tw && Math.abs(q[1]-p[1])<fs+5)) return; placed.push([p[0],p[1],tw]);
     ctx.strokeStyle='rgba(244,244,244,.18)'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(g[0],g[1]); ctx.lineTo(p[0],p[1]); ctx.stroke();
@@ -274,6 +339,7 @@ function draw(){
       ctx.font=`500 11px ${SANS}`; ctx.textAlign='left';
       const tw=ctx.measureText(label).width, lx=Math.min(near.sx+14, CW-tw-14), ly=Math.max(22, near.sy-12);
       ctx.fillStyle=`rgba(18,18,20,${.82*ptr.a})`; ctx.fillRect(lx-6,ly-13,tw+12,19); ctx.fillStyle=`rgba(244,244,244,${ptr.a})`; ctx.fillText(label,lx,ly); ctx.textAlign='center'; } }
+  updateTip();
 }
 
 // The website's bridge (js/uncharted.js) does what the Colab Python callbacks used to do.
@@ -286,7 +352,9 @@ let history=[], reroutes=0, current=null, busy=false;
 // ---------- sections: seed, map, checkpoint, logbook. One on screen at a time; the rail switches. ----------
 const PANES=['seed','gallery','map','checkpoint','logbook']; let pane=DATA && DATA.trained>=8?'gallery':'seed', paneTimer=0;
 function go(name){ clearTimeout(paneTimer); pane=name;
+  document.querySelector('.shell').classList.toggle('gallery-mode', name==='gallery');
   PANES.forEach(n=>{ $('pane-'+n).hidden = n!==name; const b=document.querySelector(`.rail [data-pane="${n}"]`); if (n===name){ b.setAttribute('aria-current','true'); b.removeAttribute('data-new'); } else b.removeAttribute('aria-current'); });
+  if (name==='gallery' && document.activeElement?.closest('.rail')) $('gallery-stage').focus({preventScroll:true});
   if (name==='map') requestAnimationFrame(resize); window.scrollTo(0,0); if (name==='checkpoint') queueSpiral(); }
 function flag(name){ if (pane!==name) document.querySelector(`.rail [data-pane="${name}"]`).setAttribute('data-new','1'); }
 let spiralFrame=0;

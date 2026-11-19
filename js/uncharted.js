@@ -6,7 +6,7 @@
 import { loadArchive, normalize, dot } from "./data.js";
 import { TasteModel } from "./taste.js";
 import { mergeInto } from "./mine.js";
-import { initGallery } from "./uncharted_gallery.js";
+import { initGallery, loadDials } from "./uncharted_gallery.js";
 
 function pcaLayout(items) {
   // Fallback when the data has no t-SNE layout: the two main directions of variation.
@@ -52,6 +52,75 @@ function placeThemes(themes, items) {
   }
 }
 
+// Map distances use the map's aspect ratio (64 x 40 cells), like the rest of the map code.
+const mapDist2 = (ax, ay, bx, by) => (ax - bx) ** 2 + ((ay - by) * 0.625) ** 2;
+
+function readLand(items, dials) {
+  const K = dials.length;
+  const scored = items.filter((it) => Number.isFinite(it.x) && Number.isFinite(it.y));
+  const Z = scored.map((it) => {
+    const z = new Float32Array(K);
+    dials.forEach((dial, k) => {
+      const [mean, std] = dial.stats[it.kind] || dial.stats.photo;
+      z[k] = (dot(it.vec, dial.vec) - mean) / (std || 1);
+    });
+    return z;
+  });
+  // A Gaussian-weighted average of the works around (x, y): the local character of the land.
+  function profile(x, y, sigma) {
+    const p = new Float32Array(K);
+    let weight = 0;
+    const s2 = 2 * sigma * sigma;
+    scored.forEach((it, i) => {
+      const w = Math.exp(-mapDist2(it.x, it.y, x, y) / s2);
+      if (w < 1e-4) return;
+      weight += w;
+      for (let k = 0; k < K; k++) p[k] += w * Z[i][k];
+    });
+    if (weight) for (let k = 0; k < K; k++) p[k] /= weight;
+    return { p, weight };
+  }
+  const word = (k, v) => (v >= 0 ? dials[k].high : dials[k].low);
+  const strongest = (p, n, floor) => [...p].map((v, k) => ({ k, v })).filter(({ v }) => Math.abs(v) > floor)
+    .sort((a, b) => Math.abs(b.v) - Math.abs(a.v)).slice(0, n);
+
+  // Named areas: the most distinctive spots, each named after a dial pole no other area uses.
+  const regions = [];
+  if (K) {
+    const candidates = [];
+    for (let gy = 0; gy < 11; gy++) for (let gx = 0; gx < 18; gx++) {
+      const x = 0.06 + (gx / 17) * 0.88, y = 0.06 + (gy / 10) * 0.88;
+      const { p, weight } = profile(x, y, 0.07);
+      if (weight < 3) continue;
+      p.forEach((v, k) => candidates.push({ x, y, k, v, p }));
+    }
+    candidates.sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
+    const usedPoles = new Set();
+    for (const c of candidates) {
+      if (regions.length >= 9 || Math.abs(c.v) < 0.35) break;
+      const pole = word(c.k, c.v);
+      if (usedPoles.has(pole) || regions.some((r) => mapDist2(r.x, r.y, c.x, c.y) < 0.17 ** 2)) continue;
+      usedPoles.add(pole);
+      // a second word only if no other area uses it, so every word on the map appears once
+      const second = strongest(c.p, 3, 0.35).find(({ k, v }) => k !== c.k && !usedPoles.has(word(k, v)));
+      if (second) usedPoles.add(word(second.k, second.v));
+      regions.push({ x: c.x, y: c.y, text: second ? `${pole} · ${word(second.k, second.v)}` : pole });
+    }
+  }
+
+  function describe(x, y) {
+    const { p, weight } = profile(x, y, 0.045);
+    const near = scored.map((it) => [mapDist2(it.x, it.y, x, y), it]).sort((a, b) => a[0] - b[0]).slice(0, 3)
+      .map(([, it]) => ({ kind: it.mine ? "your photo" : it.kind === "photo" ? "photo" : "passage", title: it.title || "Untitled", img: it.kind === "photo" ? it.img : null, creator: it.creator || "" }));
+    return {
+      empty: weight < 0.6,
+      words: weight < 0.6 ? [] : strongest(p, 3, 0.25).map(({ k, v }) => word(k, v)),
+      works: near,
+    };
+  }
+  return { regions, describe };
+}
+
 async function main() {
   let A;
   try { A = await loadArchive(); } catch (e) { console.error(e); A = null; }
@@ -76,13 +145,20 @@ async function main() {
       if (!it) continue;
       train.push({ id, x: it.x, y: it.y, yv: l.y, w: l.y ? 0.35 * l.w : 0.15 * l.w });
     }
+    // Reading the land: every work scored on the gallery's twelve CLIP design dials (in standard
+    // deviations of the archive), so any spot on the map can be described by the works around it.
+    const dials = await loadDials();
+    const land = readLand(items, dials);
+
     window.COMPASS_DATA = {
-      themes, train, trained: T.count, journey: null,
+      themes, train, trained: T.count, journey: null, regions: land.regions,
       works: items.map((it) => ({ x: it.x, y: it.y, kind: it.kind === "photo" ? 0 : 1, id: it.index, mine: !!it.mine, title: (it.title || "").slice(0, 60) })),
       mine: mine.length,
     };
 
     window.UNCHARTED_BRIDGE = {
+      // What a spot on the map is like: its strongest dial words and the works nearest to it.
+      "compass.describe": (x, y) => land.describe(x, y),
       // The real works closest in meaning to a checkpoint, excluding works already shown.
       "compass.peek": (ids, seenIds = []) => {
         const seen = new Set(Array.isArray(seenIds) ? seenIds : []);
