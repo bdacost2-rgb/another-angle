@@ -10,7 +10,8 @@
 //    colors sampled from the room's own photos, and how tight the cluster is sets how clear the air is.
 //    The room's strongest photo becomes a painterly backdrop you walk into.
 import { dot } from "./data.js";
-import { loadDials as loadSharedDials } from "./dials.js";
+import { loadDials as loadSharedDials, itemDials } from "./dials.js";
+import { loadHistory, renderHistory, decades, topDecades, yearOf } from "./history.js";
 import { fitsFocus } from "./focus.js";
 
 const $ = (selector) => document.querySelector(selector);
@@ -529,6 +530,7 @@ export function initGallery(items, model, themes = []) {
       const finished = result.filter((room) => room.works.length);
       designRooms(finished, dialSet || []);
       publishRooms(finished);
+      requestAnimationFrame(renderTasteTime);
       return finished;
     }
     // Exploration: only works you've never seen. First, the directions you chose on the map (newest first),
@@ -595,7 +597,42 @@ export function initGallery(items, model, themes = []) {
 
     const finished = result.filter((room) => room.works.length);
     designRooms(finished, dialSet || []);
+    lastBeyond = finished.flatMap((room) => room.works);
+    renderTasteTime();
     return finished;
+  }
+
+  // ---------- your taste through time ----------
+  let lastBeyond = null;
+  function renderTasteTime() {
+    const box = $("#taste-time");
+    if (!box) return;
+    const mine = model.liked.filter((it) => fitsFocus(it));
+    if (!lastBeyond && engine) { const keep = galleryMode; galleryMode = "exploration"; try { makeRooms(); } finally { galleryMode = keep; } return; }
+    const beyond = lastBeyond || [];
+    const a = decades(mine), b = decades(beyond);
+    const all = [...new Set([...a.keys(), ...b.keys()])].sort((x, y) => x - y);
+    box.replaceChildren();
+    if (!all.length) { box.append(node("p", "imgline", "Heart a few works in Inspiration to see when your taste lives.")); return; }
+    const lo = all[0], hi = all[all.length - 1];
+    const max = Math.max(1, ...a.values(), ...b.values());
+    const chart = node("div", "time-chart");
+    for (let d = lo; d <= hi; d += 10) {
+      const col = node("div", "time-col");
+      const ya = node("i", "time-mine"); ya.style.height = `${((a.get(d) || 0) / max) * 100}%`;
+      const yb = node("i", "time-beyond"); yb.style.height = `${((b.get(d) || 0) / max) * 100}%`;
+      const bars = node("div", "time-bars"); bars.append(ya, yb);
+      col.append(bars, node("small", "", (d - lo) % 30 === 0 || d === hi ? `${d}s` : ""));
+      col.title = `${d}s: ${a.get(d) || 0} you love, ${b.get(d) || 0} in Beyond`;
+      chart.append(col);
+    }
+    const mineTop = topDecades(mine), beyondTop = topDecades(beyond.filter((it) => !mineTop.includes(`${Math.floor((yearOf(it) || 0) / 10) * 10}s`)), 1);
+    box.append(
+      node("p", "time-sentence", `${mineTop.length ? `You're drawn to the ${mineTop.join(" and the ")}.` : ""}${beyondTop.length ? ` Beyond is taking you into the ${beyondTop[0]}.` : ""}`),
+      chart,
+      (() => { const k = node("p", "time-key"); const sw = (cls, text) => { const b = node("b", cls, "■"); k.append(b, ` ${text}   `); };
+        sw("key-mine", "works you love"); sw("key-beyond", "works Beyond shows you"); k.append("(by the year each was made, from the archives)"); return k; })(),
+    );
   }
 
   // The map draws each room as a constellation of its works, and can send you into a room.
@@ -743,11 +780,16 @@ export function initGallery(items, model, themes = []) {
     const credits = node("dl", "gallery-credit-list");
     const fields = [
       [item.kind === "text" ? "Author" : "Artist / maker", creatorOf(item)],
-      ["Date", item.date || "Date not listed"],
       ["Collection", item.source || "Source not listed"],
     ];
     for (const [label, value] of fields) credits.append(node("dt", "", label), node("dd", "", value));
     copy.append(credits);
+    // its history: the archive's own facts and words, then works from other eras that echo it
+    const eraIndex = (dialSet || []).findIndex((d) => d.id === "era");
+    copy.append(renderHistory(item, {
+      items, fits: (it) => fitsFocus(it), onOpen: (it) => showDetails(it),
+      eraScore: eraIndex >= 0 && item.vec ? itemDials(item, dialSet)[eraIndex] : NaN,
+    }));
 
     const anchor = model.because(item);
     if (anchor) {
@@ -1075,7 +1117,7 @@ export function initGallery(items, model, themes = []) {
         console.warn("Gallery: post-processing unavailable", error);
       }
       engine = createEngine(post);
-      await loadDials();
+      await Promise.all([loadDials(), loadHistory()]);
     } catch (error) {
       console.warn("Gallery: WebGL unavailable", error);
       stage.classList.add("is-fallback");

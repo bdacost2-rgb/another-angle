@@ -332,6 +332,37 @@ details.key .legend { position: absolute; right: 0; bottom: 28px; width: 270px; 
 .cpwide > h2 { font-family: var(--display); font-weight: 500; font-size: clamp(30px, 4vw, 56px); line-height: 1.02; letter-spacing: -.04em; margin: 4px 0 14px; }
 .cpgrid { margin-top: 22px; }
 .pane-log { max-width: 1300px; }
+.taste-time-wrap { margin: 6px 0 40px; }
+.taste-time-wrap h2 { font-family: var(--display); font-weight: 500; font-size: clamp(28px, 3vw, 44px); letter-spacing: -.04em; line-height: 1.04; margin: 0 0 10px; }
+.time-sentence { margin: 0 0 18px; font: italic 400 clamp(18px, 2vw, 24px)/1.3 var(--serif); }
+.time-chart { display: flex; align-items: flex-end; gap: 3px; height: 150px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+.time-col { position: relative; flex: 1 1 0; min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; }
+.time-bars { flex: 1; display: flex; align-items: flex-end; gap: 1px; }
+.time-bars i { flex: 1; min-height: 0; border-radius: 2px 2px 0 0; }
+.time-mine { background: #f2c27a; }
+.time-beyond { background: #b7cbf2; opacity: .85; }
+.time-col small { position: absolute; bottom: -18px; left: 0; font: 400 10px var(--mono); color: var(--muted); white-space: nowrap; }
+.time-key { margin: 26px 0 0; font: 400 11px var(--mono); color: var(--muted); }
+.time-key .key-mine { color: #f2c27a; } .time-key .key-beyond { color: #b7cbf2; }
+/* history in a work's details */
+.history { margin: 6px 0 16px; }
+.history-facts { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0 0 14px; font-size: 12px; }
+.history-facts dt { color: var(--muted); }
+.history-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.history-label { display: block; margin: 14px 0 8px; color: var(--muted); font: 400 10px var(--mono); letter-spacing: .04em; text-transform: uppercase; }
+.history-about { margin: 0; padding: 10px 0 10px 14px; border-left: 2px solid var(--warm); font: 400 15px/1.5 var(--serif); color: var(--ink); }
+.history-about cite { display: block; margin-top: 6px; font: normal 400 11px var(--body); color: var(--muted); }
+.history-note { padding: 8px 12px; border: 1px solid var(--line); color: var(--ink) !important; font-size: 12px !important; }
+.history-line { position: relative; height: 14px; margin: 6px 6px 10px; border-bottom: 1px solid var(--line); }
+.history-line i { position: absolute; bottom: -4px; width: 8px; height: 8px; margin-left: -4px; border-radius: 50%; background: #b7cbf2; }
+.history-line i.is-self { background: var(--warm); width: 11px; height: 11px; margin-left: -5.5px; bottom: -5.5px; }
+.history-echoes { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.history-echoes li { display: grid; grid-template-columns: 52px 1fr; gap: 10px; align-items: baseline; font-size: 13px; }
+.history-echoes li b { font: 400 12px var(--mono); color: var(--muted); }
+.history-echoes li.is-self b { color: var(--warm); }
+.history-echoes li span { color: var(--muted); }
+.history-echoes button { padding: 0; border: 0; background: none; color: var(--ink); text-align: left; font: inherit; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; cursor: pointer; }
+.history-echoes button:hover { text-decoration-color: currentColor; }
 details.how summary { cursor: pointer; list-style: none; }
 details.how summary::-webkit-details-marker { display: none; }
 details.how summary h2::after { content: " +"; color: var(--muted); }
@@ -507,7 +538,11 @@ details.how[open] summary h2::after { content: " −"; }
 
     <!-- 05 logbook -->
     <section class="pane pane-log" id="pane-logbook" aria-label="Logbook" hidden>
-      <div class="tag">03 · logbook</div>
+      <div class="tag">04 · logbook</div>
+      <section class="taste-time-wrap" aria-label="Your taste through time">
+        <h2>Your taste through time</h2>
+        <div id="taste-time"></div>
+      </section>
       <div class="loggrid">
         <div>
           <h2>Your trail</h2>
