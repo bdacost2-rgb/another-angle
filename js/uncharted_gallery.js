@@ -241,23 +241,41 @@ function floorScore(D, kind) {
     default: return 0;
   }
 }
+// The room's theme names a place more reliably than the dials do (Desert Southwest is sand, whatever
+// its works' mood), so the theme's grounds lead and the dials only break ties.
+const THEME_GROUND = {
+  "southern gothic": ["forest", "water"], "film noir": ["water", "neon"], "afrofuturism": ["neon", "clouds"],
+  "magical realism": ["clouds", "meadow"], "pastoral": ["meadow", "water"], "cyberpunk": ["neon"],
+  "surrealism": ["clouds", "sand"], "documentary": ["marble", "water"], "minimalism": ["snow", "marble"],
+  "folk horror": ["forest", "meadow"], "cosmic": ["clouds", "snow"], "romanticism": ["water", "meadow"],
+  "harlem renaissance": ["marble", "neon"], "dark academia": ["marble", "forest"], "cottagecore": ["meadow", "forest"],
+  "brutalism": ["marble", "snow"], "vaporwave": ["neon", "clouds"], "solarpunk": ["meadow", "water"],
+  "americana": ["sand", "meadow"], "dystopia": ["neon", "sand"], "fairy tale": ["forest", "clouds"],
+  "greek myth": ["marble", "water"], "desert southwest": ["sand"], "maritime": ["water"],
+  "urban decay": ["neon", "marble"], "coming of age": ["meadow", "water"],
+};
+function groundScore(room, kind) {
+  const places = THEME_GROUND[room.theme?.n?.toLowerCase()] || [];
+  const rank = places.indexOf(kind);
+  return floorScore(room.design, kind) + (rank === 0 ? 1.4 : rank === 1 ? 0.7 : 0);
+}
 function assignFloors(rooms) {
-  const pick = matchOneToOne(rooms.map((room) => FLOORS.map((kind) => floorScore(room.design, kind))));
+  const pick = matchOneToOne(rooms.map((room) => FLOORS.map((kind) => groundScore(room, kind))));
   const used = new Set();
   rooms.forEach((room, i) => {
     room.floor = FLOORS[pick[i]] || FLOORS[i % FLOORS.length];
     // Distinct grounds matter, but not more than fit: a pastoral room shouldn't land on a neon grid just
     // because the meadow was taken. If the match is much worse than the room's best fit, take the best
     // free fit that's close, or share the best one.
-    const ranked = FLOORS.map((kind) => [kind, floorScore(room.design, kind)]).sort((a, b) => b[1] - a[1]);
+    const ranked = FLOORS.map((kind) => [kind, groundScore(room, kind)]).sort((a, b) => b[1] - a[1]);
     const best = ranked[0][1];
-    if (floorScore(room.design, room.floor) < best * 0.6) {
+    if (groundScore(room, room.floor) < best * 0.6) {
       const taken = new Set(rooms.map((_, k) => (k === i ? null : FLOORS[pick[k]])).filter(Boolean));
       room.floor = (ranked.find(([kind, v]) => v >= best * 0.85 && !taken.has(kind) && !used.has(kind)) || ranked[0])[0];
     }
     used.add(room.floor);
     // say why, in plain words, in the "why this room?" panel
-    const lean = FLOORS.map((kind) => [kind, floorScore(room.design, kind)]).sort((a, b) => b[1] - a[1]);
+    const lean = FLOORS.map((kind) => [kind, groundScore(room, kind)]).sort((a, b) => b[1] - a[1]);
     room.floorNote = `You walk on ${FLOOR_LABEL[room.floor]}${lean[0][0] === room.floor ? ", the ground that fits these works best" : ", a ground that suits these works (another room claimed its first choice)"}.`;
   });
 }
@@ -1231,12 +1249,6 @@ export function initGallery(items, model, themes = []) {
     sky.renderOrder = -1;
     scene.add(sky);
 
-    // light from a picture lamp: brightest at the top of the work, fading down
-    const washTexture = canvasTexture(THREE, 4, 128, (ctx, w, h) => {
-      const g = ctx.createLinearGradient(0, 0, 0, h);
-      g.addColorStop(0, "rgba(255,255,255,1)"); g.addColorStop(1, "rgba(255,255,255,0)");
-      ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
-    });
     const glowTexture = canvasTexture(THREE, 128, 128, (ctx, w) => {
       const g = ctx.createRadialGradient(w / 2, w / 2, 0, w / 2, w / 2, w / 2);
       g.addColorStop(0, "rgba(255,255,255,1)");
@@ -1996,59 +2008,22 @@ export function initGallery(items, model, themes = []) {
       const width = Math.min(4.2, height * aspect);
       const h = width / aspect;
       const holder = new THREE.Group();
-      // Hung like a museum piece: a cream mat around photographs, a wood frame, a thin sheen of glass,
-      // and a small picture lamp washing the work from above with a pool of light below.
-      const matBorder = isText ? 0 : 0.18;
-      const frame = new THREE.Mesh(track(new THREE.BoxGeometry(width + matBorder * 2 + 0.14, h + matBorder * 2 + 0.14, 0.08)), track(new THREE.MeshLambertMaterial({ color: c.deep.clone().lerp(new THREE.Color(0x2a2118), 0.6) })));
+      // Each work floats in its own simple frame, with nothing laid over or around the art itself.
+      const frame = new THREE.Mesh(track(new THREE.BoxGeometry(width + 0.14, h + 0.14, 0.07)), track(new THREE.MeshLambertMaterial({ color: c.deep.clone().lerp(new THREE.Color(0x2a2118), 0.6) })));
       frame.position.z = -0.05;
       // the finish pass tone-maps everything, so artwork is lifted slightly to keep its true brightness
       const art = new THREE.Mesh(track(new THREE.PlaneGeometry(width, h)), track(new THREE.MeshBasicMaterial({ map, toneMapped: false, color: new THREE.Color(1, 1, 1).multiplyScalar(composer ? 1.22 : 1) })));
-      const halo = new THREE.Mesh(track(new THREE.PlaneGeometry(width * 2.6, h * 2.4)), track(new THREE.MeshBasicMaterial({ map: glowTexture, color: c.glow, transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending, depthWrite: false })));
+      const halo = new THREE.Mesh(track(new THREE.PlaneGeometry(width * 2.6, h * 2.4)), track(new THREE.MeshBasicMaterial({ map: glowTexture, color: c.glow, transparent: true, opacity: 0.26, blending: THREE.AdditiveBlending, depthWrite: false })));
       halo.position.z = -0.12;
       holder.add(halo, frame, art);
-      if (matBorder) {
-        const mat = new THREE.Mesh(track(new THREE.PlaneGeometry(width + matBorder * 2, h + matBorder * 2)), track(new THREE.MeshLambertMaterial({ color: 0xeee8dd })));
-        mat.position.z = -0.006;
-        holder.add(mat);
-      }
-      const glass = new THREE.Mesh(track(new THREE.PlaneGeometry(width + matBorder * 2, h + matBorder * 2)), track(new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.08, roughness: 0.05, metalness: 1, depthWrite: false })));
-      glass.position.z = 0.008;
-      const wash = new THREE.Mesh(track(new THREE.PlaneGeometry(width, h * 0.6)), track(new THREE.MeshBasicMaterial({ map: washTexture, color: c.light.clone().lerp(new THREE.Color(0xffe2b8), 0.6), transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false })));
-      wash.position.set(0, h * 0.2, 0.004);
-      const lamp = new THREE.Mesh(track(new THREE.BoxGeometry(Math.min(0.9, width * 0.45), 0.04, 0.07)), track(new THREE.MeshLambertMaterial({ color: 0x3a3026 })));
-      lamp.position.set(0, h / 2 + matBorder + 0.2, 0.16);
-      const bulb = new THREE.Sprite(track(new THREE.SpriteMaterial({ map: glowTexture, color: 0xffd9a0, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false })));
-      bulb.position.set(0, h / 2 + matBorder + 0.17, 0.2);
-      bulb.scale.setScalar(0.55);
-      holder.add(glass, wash, lamp, bulb);
-      if (entry.floor !== "clouds") {
-        const pool = new THREE.Mesh(track(new THREE.PlaneGeometry(3.4, 2.2).rotateX(-Math.PI / 2)), track(new THREE.MeshBasicMaterial({ map: glowTexture, color: 0xffe0b0, transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false })));
-        pool.position.set(0, -entry.position.y + 0.03, 0.9);
-        holder.add(pool);
-      }
-      // How the work is shown depends on the ground: a standing stone wall in the marble court, a glowing
-      // frame on the neon grid, floating higher over the clouds, and a wooden post on land.
+      // Every work floats; over the clouds a little higher and with a slower, deeper drift.
       const floor = entry.floor || "water";
-      const ground = entry.position.y;
-      if (floor === "marble") {
-        const wallH = ground + h / 2 + 0.7;
-        const wall = new THREE.Mesh(track(new THREE.BoxGeometry(width + 0.9, wallH, 0.22)), track(new THREE.MeshPhongMaterial({ color: c.light.clone().lerp(new THREE.Color(0xf3ece0), 0.6), shininess: 30 })));
-        wall.position.set(0, -ground + wallH / 2, -0.2);
-        holder.add(wall);
-        entry.bob = 0;
-      } else if (floor === "neon") {
+      if (floor === "neon") {
         frame.material.emissive = c.glow.clone().lerp(new THREE.Color(0x40e0ff), 0.4);
         frame.material.emissiveIntensity = 0.9;
-        halo.material.opacity = 0.5;
       } else if (floor === "clouds") {
         entry.position.y += 0.5;
-        entry.bob = 0.22;
-      } else if (floor !== "water") {
-        const postH = ground - h / 2;
-        const post = new THREE.Mesh(track(new THREE.CylinderGeometry(0.05, 0.07, postH, 8)), track(new THREE.MeshLambertMaterial({ color: floor === "snow" ? 0x5a4636 : 0x4a3626 })));
-        post.position.set(0, -h / 2 - postH / 2, -0.06);
-        holder.add(post);
-        entry.bob = 0;
+        entry.bob = 0.18;
       }
       holder.position.copy(entry.position);
       holder.rotation.y = entry.rotationY;
@@ -2275,11 +2250,11 @@ export function initGallery(items, model, themes = []) {
           const facing = Math.sin(holder.rotation.y) * (camera.position.x - holder.position.x) + Math.cos(holder.rotation.y) * (camera.position.z - holder.position.z);
           holder.visible = facing > 0;
         }
-        const lift = reducedMotion.matches ? 0 : Math.sin(t * 0.6 + entry.phase) * (entry.bob ?? 0.012); // works hang nearly still
+        const lift = reducedMotion.matches ? 0 : Math.sin(t * 0.7 + entry.phase) * (entry.bob ?? 0.05); // works float gently
         holder.position.y = entry.baseY + lift;
         const target = entry === hovered ? 1.06 : 1;
         holder.scale.setScalar(holder.scale.x + (target - holder.scale.x) * 0.12);
-        entry.halo.material.opacity += ((entry === hovered ? 0.45 : 0.18) - entry.halo.material.opacity) * 0.1;
+        entry.halo.material.opacity += ((entry === hovered ? 0.6 : 0.26) - entry.halo.material.opacity) * 0.1;
         if (!hovered) {
           const d = camera.position.distanceTo(holder.position);
           const ahead = new THREE.Vector3().subVectors(holder.position, camera.position).normalize().dot(camera.getWorldDirection(tmpV));
