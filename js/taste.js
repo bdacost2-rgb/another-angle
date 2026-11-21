@@ -89,13 +89,15 @@ export class TasteModel {
 
   // Pick n items: Thompson sample + diversity (no near-duplicates in a batch).
   // anchor: optional centered vector to stay close to ("more like this" or a search).
-  pick(n, { kind = null, exclude = new Set(), anchor = null, anchorWeight = 0.75 } = {}) {
+  // bonus: optional (item) -> number added to each score (the feed's design-dial steering).
+  pick(n, { kind = null, exclude = new Set(), anchor = null, anchorWeight = 0.75, bonus = null } = {}) {
     const w = this.sampleWeights();
     const pool = this.a.items.filter((it) => (!kind || it.kind === kind) && !exclude.has(it.id) && !this.labels.has(it.id));
     const scored = pool.map((it) => {
       const taste = this.count ? Math.tanh(this.score(it, w) / 4) : (Math.random() - 0.5) * 0.4;
       const near = anchor ? dot(anchor, it.vec) : 0;
-      return { it, s: anchor ? anchorWeight * near * 3 + (1 - anchorWeight) * taste : taste };
+      const s = anchor ? anchorWeight * near * 3 + (1 - anchorWeight) * taste : taste;
+      return { it, s: bonus ? s + bonus(it) : s };
     }).sort((x, y) => y.s - x.s).slice(0, n * 8);
     const chosen = [];
     while (chosen.length < n && scored.length) {

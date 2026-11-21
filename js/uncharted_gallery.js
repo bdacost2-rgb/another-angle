@@ -4,12 +4,14 @@
 //    follow what the works look and read like, not a fixed list. k is picked by silhouette score.
 // 2. Naming: each cluster centroid is compared with the 26 curated theme embeddings; the closest
 //    unused theme names the room.
-// 3. World-building: a softmax over centroid-to-theme similarity becomes a mixture of scenery
-//    "archetypes" (meadow, water, city, cosmos, desert, dream, road, hall), so a room near both
-//    Film noir and Cosmic gets a night city under stars. Colors blend the theme palette with colors
-//    sampled from the room's own photos, and how tight the cluster is sets how clear the air is.
+// 3. World-building: the room's works are scored on twelve CLIP design dials (js/dials.js), and one
+//    procedural generator builds terrain, growth, structures, sky, weather and light from those
+//    numbers. Each room gets a signature dial no other room has. Colors blend the theme palette with
+//    colors sampled from the room's own photos, and how tight the cluster is sets how clear the air is.
 //    The room's strongest photo becomes a painterly backdrop you walk into.
 import { dot } from "./data.js";
+import { loadDials as loadSharedDials } from "./dials.js";
+import { fitsFocus } from "./focus.js";
 
 const $ = (selector) => document.querySelector(selector);
 const UNIT_PX = 64; // scroll pixels per world unit
@@ -157,14 +159,7 @@ function recipeFor(works, themes, takenThemes) {
 
 let dialSet = null;
 export async function loadDials() {
-  if (dialSet) return dialSet;
-  try {
-    const data = await (await fetch("data/dials.json")).json();
-    dialSet = data.dials.map((d) => ({ ...d, vec: Float32Array.from(d.vec) }));
-  } catch (error) {
-    console.warn("Gallery: design dials unavailable", error);
-    dialSet = [];
-  }
+  dialSet = await loadSharedDials();
   return dialSet;
 }
 
@@ -498,14 +493,16 @@ export function initGallery(items, model, themes = []) {
     if (model.count >= 8 && model.liked.length >= 4) {
       intro.textContent = `Built from ${model.count} choices. CLIP grouped the works you were drawn to by how they look and read, and each group became a room. CLIP then scored each group on twelve design dials (built or overgrown, day or night, still or stormy, grounded or weightless…), and every room is generated from its own scores.`;
     } else if (model.count >= 8) {
-      intro.textContent = `Built from ${model.count} choices. Mark a few more works as "Drawn to this" and CLIP will group them into rooms of their own.`;
+      intro.textContent = `Built from ${model.count} choices. Save a few more works (♥) and CLIP will group them into rooms of their own.`;
     } else {
       intro.textContent = "This is a preview. As you choose works in Inspiration, CLIP will group them by aesthetic and build a room around each group.";
     }
   }
 
   function makeRooms() {
-    const liked = uniqueWorks([...model.liked].sort((a, b) => model.score(b) - model.score(a)), model.liked.length);
+    // Only the kinds of work you asked to see (Photos · Photos + writing · Writing).
+    const fits = (item) => fitsFocus(item);
+    const liked = uniqueWorks([...model.liked].filter(fits).sort((a, b) => model.score(b) - model.score(a)), model.liked.length);
     const labeled = new Set(model.labels.keys());
     const used = new Set([...labeled, ...liked.map((item) => item.id)]);
     const usedTitles = new Set(liked.map(workKey));
@@ -528,18 +525,18 @@ export function initGallery(items, model, themes = []) {
       });
     }
     if (!result.length) {
-      const first = uniqueWorks(model.pick(12), 4);
+      const first = uniqueWorks(model.pick(24).filter(fits), 4);
       first.forEach((item) => { used.add(item.id); usedTitles.add(workKey(item)); });
       if (first.length) result.push({ ...recipe(first), title: "A first look", note: "Choose works in Inspiration to make these rooms reflect your taste.", works: first });
     }
 
-    const echoes = uniqueWorks(model.pick(24, { exclude: used }), 4, usedTitles);
+    const echoes = uniqueWorks(model.pick(36, { exclude: used }).filter(fits), 4, usedTitles);
     echoes.forEach((item) => { used.add(item.id); usedTitles.add(workKey(item)); });
     if (echoes.length) {
       result.push({ ...recipe(echoes), title: "Where the echoes lead", note: "The Compass finds likely matches, varied so the room doesn't repeat itself.", works: echoes });
     }
 
-    const candidates = items.filter((item) => !used.has(item.id) && !usedTitles.has(workKey(item)));
+    const candidates = items.filter((item) => fits(item) && !used.has(item.id) && !usedTitles.has(workKey(item)));
     const edge = uniqueWorks(diverse(candidates, Math.min(12, candidates.length), (item) => {
       const boundary = 1 - Math.abs(2 * model.prob(item) - 1);
       return model.uncertainty(item) * (0.65 + boundary * 0.35);
@@ -549,9 +546,9 @@ export function initGallery(items, model, themes = []) {
       result.push({ ...recipe(edge), title: "At the edge of your taste", note: "These works sit near the model's uncertain boundary. Your reaction helps it learn.", works: edge });
     }
 
-    const ringCandidates = [...model.pick(24, { exclude: used }), ...items.filter((item) => !used.has(item.id))];
+    const ringCandidates = [...model.pick(36, { exclude: used }), ...items.filter((item) => !used.has(item.id))].filter(fits);
     let ring = uniqueWorks(ringCandidates, 8, usedTitles);
-    if (!ring.length) ring = uniqueWorks(items, 8);
+    if (!ring.length) ring = uniqueWorks(items.filter(fits), 8);
     const lead = result[0];
     result.push({
       theme: lead?.theme || null,
@@ -581,6 +578,8 @@ export function initGallery(items, model, themes = []) {
     window.dispatchEvent(new CustomEvent("gallery:rooms"));
   }
   let pendingEntry = null;
+  // Switching between photos, writing or both rebuilds the rooms (and the map's constellations).
+  window.addEventListener("focus:change", () => { if (engine) build(); });
   window.addEventListener("gallery:enter-room", (event) => {
     const index = event.detail?.index;
     if (!Number.isInteger(index)) return;
@@ -593,7 +592,7 @@ export function initGallery(items, model, themes = []) {
   function renderFeedback(item, container) {
     const actions = node("div", "gallery-feedback");
     const current = model.labels.get(item.id);
-    for (const [label, text] of [[1, "Drawn to this"], [0, "Not for me"]]) {
+    for (const [label, text] of [[1, "♥ Save"], [0, "× Less like this"]]) { // the same words as the inspiration feed
       const button = node("button", "", text);
       button.type = "button";
       button.setAttribute("aria-pressed", String(current?.y === label && current.w >= 1));
@@ -625,6 +624,7 @@ export function initGallery(items, model, themes = []) {
       image.src = item.img;
       image.alt = titleOf(item);
       image.referrerPolicy = "no-referrer";
+      image.addEventListener("error", () => image.replaceWith(node("p", "gallery-detail-words", "The image is resting at the archive. Open the archive record to see it.")));
       artwork.append(image);
     } else {
       artwork.append(node("p", "gallery-detail-words", item.text || ""));
@@ -714,8 +714,31 @@ export function initGallery(items, model, themes = []) {
     scrollToDistance(center && room?.ring ? layout.ringCenter : layout.starts[target] + 0.5, instant);
   }
 
+  // The end of the walk points somewhere: write from the room you're in, or explore the map further.
+  const endCard = $("#gallery-end");
+  let endShown = false;
+  function showEnd(on) {
+    if (!endCard || on === endShown) return;
+    endShown = on;
+    endCard.classList.toggle("is-on", on);
+    endCard.setAttribute("aria-hidden", String(!on));
+    endCard.querySelectorAll("button").forEach((b) => (b.tabIndex = on ? 0 : -1));
+  }
+  $("#gallery-write")?.addEventListener("click", () => {
+    const room = rooms[roomIndex] || rooms[rooms.length - 1];
+    if (!room) return;
+    const photo = room.works.find((w) => w.kind === "photo");
+    const text = room.works.find((w) => w.kind === "text");
+    try {
+      localStorage.setItem("anotherangle.handoff.v1", JSON.stringify({ photo: photo?.id || null, text: text?.id || null, words: room.signature || [], room: room.title }));
+    } catch { /* without storage the coach still opens, just without the room */ }
+    location.href = "index.html#write";
+  });
+  $("#gallery-explore")?.addEventListener("click", () => document.querySelector('.rail [data-pane="map"]')?.click());
+
   function updateControls(distance, p) {
     const room = rooms[roomIndex];
+    showEnd(Boolean(room?.ring) && (p > 0.97 || distance >= layout.ringCenter + ORBIT_UNITS * 0.55));
     const label = `${room?.ring ? "ring room" : "room"} ${String(roomIndex + 1).padStart(2, "0")} / ${String(rooms.length).padStart(2, "0")}`;
     if (progress.textContent !== label) progress.textContent = label;
     if (roomName && room && roomName.textContent !== room.title) roomName.textContent = room.title;

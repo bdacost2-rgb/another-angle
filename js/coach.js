@@ -35,7 +35,8 @@ function betaSample(a, b) {
 }
 
 export class Coach {
-  constructor({ embed, inspiration, say }) {
+  constructor({ embed, inspiration, say, leave = null }) {
+    this.leave = leave;           // () -> go back to the inspiration feed
     this.embed = embed;           // async (list of strings) -> list of vectors, or null
     this.inspiration = inspiration; // (category) -> {item, partner} or null
     this.say = say;               // (message) -> render it
@@ -156,12 +157,55 @@ export class Coach {
         s.feedback = a === "Skip" ? "" : a;
         return this.finish();
 
+      case "inspired":
+        if (a === "Another prompt") return this.writeFrom(s.seed, true);
+        if (!a) return this.ask(st, "Write a line or two first, or ask for another prompt.", { input: "Your first lines", multiline: true, options: ["Another prompt"] });
+        s.draft = a;
+        this.data.history.push({
+          timestamp: new Date().toISOString().slice(0, 16).replace("T", " "),
+          problem: `Writing from inspiration: ${s.seed.item?.title || "a photo"}`, category: "Inspiration", exercise: s.prompt,
+          chosen_solution: s.prompt, draft: a, helped: "", progress: "", feedback: "", next_action: "",
+        });
+        this.save();
+        return this.ask("inspired_next", `That's a start, and it's saved with your sessions (${a.split(/\s+/).length} words). Where next?`,
+          { options: ["Keep going with another prompt", "Work on a writing problem.", "Back to my inspiration feed"] });
+      case "inspired_next":
+        if (a.startsWith("Keep going")) return this.writeFrom(s.seed, true);
+        if (a.startsWith("Back")) { this.state = null; this.bot("See you in the feed. Tap “Write from this” on anything that pulls at you."); return this.leave?.(); }
+        if (!this.data.profile?.name) return this.ask("name", "First, a quick profile. What is your name?", { input: "Your name" });
+        return this.askProblem();
+
       case "menu":
         if (a.startsWith("Work on another")) return this.askProblem();
         if (a.startsWith("View")) { this.showHistory(); return this.ask("menu", "Would you like to continue?", { options: ["Work on another writing problem.", "Exit CreateAI."] }); }
         this.state = null;
         return this.bot("Thank you for using CreateAI. Keep writing!", { options: ["Start again"], restart: true });
     }
+  }
+
+  // Writing from an inspiration pair: the photo and passage, what CLIP says they share, and a prompt
+  // built from those words. Needs no profile, so it works straight from the feed.
+  writeFrom(seed, again = false) {
+    this.s = { seed };
+    const words = seed.words?.length ? seed.words : ["quiet"];
+    const [w1, w2 = w1] = words;
+    const prompts = [
+      `Write the minute before this photo was taken. Keep it ${w1}.`,
+      `Someone from the passage walks into this photo. What do they notice first? Make it feel ${w1} and ${w2}.`,
+      `Describe what is just outside the frame. Let it be ${w2}.`,
+      `Borrow one phrase from the passage and use it as the first line of a scene set in this photo.`,
+      `Write this place as a memory, ten years later. Keep one ${w1} detail exact.`,
+      `Give the photo a voice. What would it say about the passage beside it?`,
+    ];
+    const pool = prompts.filter((p) => p !== seed.lastPrompt);
+    const prompt = pool[Math.floor(Math.random() * pool.length)];
+    seed.lastPrompt = prompt;
+    this.s.prompt = prompt;
+    if (!again) {
+      const read = seed.words?.length ? ` CLIP reads ${seed.room ? "this room" : "them both"} as ${seed.words.join(" · ")}.` : "";
+      this.bot(`${seed.room ? `Let's write from “${seed.room}”.` : "Let's write from this pair."}${read}`, { card: seed.item ? { item: seed.item, partner: seed.partner } : null });
+    }
+    this.ask("inspired", `Prompt: ${prompt}\n\nWrite a few lines. Rough is fine.`, { input: "Your first lines", multiline: true, options: ["Another prompt"] });
   }
 
   askProblem() {

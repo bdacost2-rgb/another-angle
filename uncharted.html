@@ -80,19 +80,26 @@ canvas#map { display: block; width: 100%; aspect-ratio: 16 / 10; max-width: 100%
 .cpgrid .ans { padding: 14px 8px; font-size: 14px; }
 .cpgrid .cp-feedback { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(180px, .82fr) minmax(0, 1.18fr); gap: clamp(22px, 3vw, 44px); align-items: center; padding-top: 16px; border-top: 1px solid var(--line); }
 .cpgrid .cp-feedback .col-h { margin: 0; padding: 0; border: 0; }
-.cpgrid .cp-feedback .answers { grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; }
+.cpgrid .cp-feedback .answers { grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; }
 @media (max-width: 960px) { .cpgrid { grid-template-columns: 1fr; gap: 18px; } .cpgrid .cp-feedback { grid-template-columns: 1fr; gap: 10px; } }
-@media (max-width: 620px) { .cpgrid .cp-feedback .answers { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 620px) { .cpgrid .cp-feedback .answers { grid-template-columns: 1fr; } }
 .vote { display: flex; gap: 6px; margin-top: 4px; }
 .v { flex: 1; font: 500 11px var(--body); color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 0; padding: 4px 6px; cursor: pointer; }
 .v:hover:not(:disabled) { color: var(--ink); border-color: var(--muted); }
 .v[data-on="1"][data-g="1"] { color: var(--accent); border-color: var(--accent); }
 .v[data-on="1"][data-g="0"] { color: var(--sea); border-color: var(--sea); }
 .v:disabled:not([data-on="1"]) { opacity: .35; cursor: default; }
-.near { position: relative; display: grid; grid-template-columns: 1fr; gap: clamp(72px, 12vh, 136px); margin-top: 10px; padding: clamp(42px, 8vh, 100px) 0; perspective: 1100px; isolation: isolate; }
-.near-spiral-trace { position: absolute; z-index: -1; inset: 0 auto 0 50%; width: min(100%, 760px); height: 100%; transform: translateX(-50%); pointer-events: none; overflow: visible; }
-.near-spiral-trace path { fill: none; stroke: rgba(255,229,207,.3); stroke-width: .7; stroke-dasharray: 2 9; stroke-linecap: round; vector-effect: non-scaling-stroke; }
-.near-item { position: relative; left: 50%; z-index: 1; display: flex; flex-direction: column; width: min(100%, 520px); min-width: 0; margin: 0; padding: 10px; border: 1px solid var(--line); background: rgba(24,24,26,.96); transform: translate3d(calc(-50% + var(--spiral-x, 0px)), 0, 0) rotateY(var(--spiral-yaw, 0deg)) rotateZ(var(--spiral-rotation, 0deg)) scale(var(--spiral-scale, 1)); transform-style: preserve-3d; backface-visibility: hidden; will-change: transform; }
+.near { position: relative; display: grid; grid-template-columns: 1fr; gap: clamp(72px, 14vh, 150px); margin-top: 10px; padding: clamp(42px, 30vh, 280px) 0; isolation: isolate; }
+.near::before { content: ""; position: absolute; z-index: -1; left: 50%; top: 0; bottom: 0; width: 1px; background: linear-gradient(transparent, rgba(255,229,207,.22) 12%, rgba(255,229,207,.22) 88%, transparent); }
+.near-item { position: relative; left: 50%; z-index: 1; display: flex; flex-direction: column; width: min(100%, 520px); min-width: 0; margin: 0; padding: 10px; border: 1px solid var(--line); background: rgba(24,24,26,.96); transform: translate3d(-50%, 0, 0) scale(var(--focus-scale, 1)); filter: blur(var(--focus-blur, 0px)); opacity: var(--focus-dim, 1); will-change: transform, filter, opacity; transition: border-color .4s; }
+.near-item.is-focus { border-color: rgba(255,229,207,.45); }
+.near-progress { position: fixed; z-index: 20; right: 32px; top: 50%; display: grid; justify-items: end; gap: 6px; transform: translateY(-50%); pointer-events: none; }
+.near-progress[hidden] { display: none; }
+.near-progress b { font: 400 13px var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
+.near-progress span { font: 400 10px var(--mono); color: var(--muted); }
+.near-progress i { display: grid; gap: 5px; justify-items: end; margin-top: 6px; }
+.near-progress em { display: block; width: 10px; height: 1px; background: var(--muted); transition: width .3s, background .3s; }
+.near-progress em.on { width: 22px; background: var(--warm); }
 .near-item.near-passage { width: min(100%, 660px); }
 .near img { width: 100%; aspect-ratio: 3 / 2; object-fit: contain; display: block; background: #242326; }
 .near-caption { display: grid; gap: 3px; margin-top: 8px; }
@@ -106,7 +113,7 @@ canvas#map { display: block; width: 100%; aspect-ratio: 16 / 10; max-width: 100%
 .cp-cursor[data-kind="read"] { width: 84px; height: 84px; }
 @media (hover: hover) and (pointer: fine) { .near { cursor: none; } .near .v { cursor: pointer; } }
 @media (hover: none), (pointer: coarse) { .cp-cursor { display: none; } }
-@media (max-width: 620px) { .near { gap: 56px; padding: 36px 0; } .near-item { width: min(100%, 430px); } .near-item.near-passage { width: min(100%, 520px); } .cp-cursor { display: none; } }
+@media (max-width: 620px) { .near { gap: 56px; padding: 26vh 0; } .near-progress { right: 10px; } .near-item { width: min(100%, 430px); } .near-item.near-passage { width: min(100%, 520px); } .cp-cursor { display: none; } }
 details.how { margin-top: 26px; border-top: 1px solid var(--line); padding-top: 14px; color: var(--muted); }
 details.how summary { cursor: pointer; color: var(--ink); font-weight: 500; }
 details.how ol { max-width: 75ch; padding-left: 20px; }
@@ -138,6 +145,28 @@ details.how li { margin: 6px 0; }
 .rail button:hover { opacity: .85; }
 .rail button[aria-current] { opacity: 1; transform: translateX(6px); }
 .rail button[aria-current]::before { content: ""; position: absolute; left: -30px; top: 50%; width: 18px; height: 1px; background: var(--ink); }
+.uc-showme { display: grid; gap: 8px; margin-top: 26px; }
+.uc-showme > span { font: 400 10px var(--mono); color: var(--muted); }
+.uc-seg { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.rail .uc-seg button, .uc-seg button { padding: 4px 0; border: 0; background: none; color: var(--ink); opacity: .42; font: 500 12px var(--body); cursor: pointer; transform: none; }
+.uc-seg button:hover { opacity: .85; }
+.uc-seg button[aria-pressed="true"] { opacity: 1; }
+.uc-seg button[aria-pressed="true"]::before { content: "● "; font-size: 8px; vertical-align: 2px; color: var(--warm); }
+.rail .uc-seg button::after, .rail .uc-seg button[aria-current]::before { content: none; }
+.uc-showme--gallery { pointer-events: auto; position: absolute; left: 50%; top: 0; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; margin: 0; }
+.uc-showme--gallery > span { color: rgba(243,236,224,.6); }
+.uc-showme--gallery .uc-seg { flex-direction: row; padding: 3px; border: 1px solid rgba(243,236,224,.3); border-radius: 999px; background: rgba(10,12,16,.25); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+.uc-showme--gallery .uc-seg button { padding: 6px 14px; border-radius: 999px; color: var(--cream); opacity: .7; }
+.uc-showme--gallery .uc-seg button[aria-pressed="true"] { background: var(--cream); color: #16141c; opacity: 1; }
+.uc-showme--gallery .uc-seg button[aria-pressed="true"]::before { content: none; }
+@media (max-width: 820px) { .uc-showme--gallery > span { display: none; } .uc-showme--gallery { top: 46px; } }
+.rail button[hidden] { display: none; }
+.gallery-end { position: absolute; z-index: 5; left: 50%; top: 62%; display: grid; justify-items: center; gap: 12px; transform: translate(-50%, 10px); opacity: 0; pointer-events: none; transition: opacity .6s ease, transform .6s cubic-bezier(.22,1,.36,1); text-align: center; }
+.gallery-end.is-on { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+.gallery-end small { color: rgba(243,236,224,.7); }
+.gallery-end div { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.gallery-end button { height: 42px; padding: 0 18px; border: 1px solid rgba(243,236,224,.5); background: rgba(10,12,16,.3); color: var(--cream); font: 400 14px var(--body); cursor: pointer; -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); transition: background .25s, color .25s; }
+.gallery-end button:hover, .gallery-end button:focus-visible { background: var(--cream); color: #16141c; }
 .rail button[data-new]::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--warm); align-self: center; animation: beat 1.2s ease-in-out infinite; }
 @keyframes beat { 50% { transform: scale(1.8); opacity: .4; } }
 .panes { min-width: 0; }
@@ -277,6 +306,8 @@ details.key .legend { position: absolute; right: 0; bottom: 28px; width: 270px; 
 @media (max-width: 820px) {
   .shell { grid-template-columns: 1fr; }
   .rail { position: sticky; top: 0; z-index: 9; height: auto; flex-direction: row; justify-content: flex-start; gap: 18px; padding: 0 16px; border-right: 0; border-bottom: 1px solid var(--line); background: rgba(18,18,20,.92); overflow-x: auto; }
+  .rail .uc-showme { display: flex; align-items: center; gap: 8px; margin: 0 0 0 auto; padding-left: 12px; }
+  .rail .uc-seg { flex-direction: row; gap: 10px; }
   .rail button[aria-current] { transform: none; } .rail button[aria-current]::before { left: 0; right: 0; top: auto; bottom: 4px; width: auto; }
   .pane-map .mapbox { height: calc(100dvh - 150px); }
   .gallery-stage { min-height: 320px; }
@@ -287,6 +318,12 @@ details.key .legend { position: absolute; right: 0; bottom: 28px; width: 270px; 
   .gallery-detail-copy { padding: 36px 22px 22px; }
   .setup-row, .loggrid { grid-template-columns: 1fr; }
   .hud { gap: 14px; } .how-to { display: none; }
+  /* phones: the status reads across the top, the stats sit in a row beneath it */
+  .pane-map .status { right: 12px; max-width: none; }
+  .pane-map .hud { top: auto; bottom: 132px; left: 12px; right: 12px; justify-content: space-between; text-align: left; }
+  .pane-map .hud .stat b { font-size: 20px; }
+  .rail .uc-showme > span { display: none; }
+  .rail .uc-showme { padding-left: 4px; }
 }
 @media (max-width: 640px) {
   .gallery-stage { top: 82px; height: calc(100dvh - 82px); }
@@ -313,17 +350,18 @@ details.key .legend { position: absolute; right: 0; bottom: 28px; width: 270px; 
 </nav>
 <div class="shell">
   <nav class="rail" aria-label="Uncharted sections">
-    <button type="button" data-pane="seed" aria-current="true"><span>01</span>seed</button>
-    <button type="button" data-pane="gallery"><span>02</span>gallery</button>
-    <button type="button" data-pane="map"><span>03</span>map</button>
-    <button type="button" data-pane="checkpoint"><span>04</span>checkpoint</button>
-    <button type="button" data-pane="logbook"><span>05</span>logbook</button>
+    <button type="button" data-pane="seed" aria-current="true"><span>00</span>start</button>
+    <button type="button" data-pane="gallery"><span>01</span>gallery</button>
+    <button type="button" data-pane="map"><span>02</span>explore</button>
+    <button type="button" data-pane="checkpoint" hidden><span>02</span>checkpoint</button>
+    <button type="button" data-pane="logbook"><span>03</span>logbook</button>
+    <div class="uc-showme" role="group" aria-label="Show me"><span>show me</span><div class="uc-seg"><button type="button" data-focus="photo" aria-pressed="false">photos</button><button type="button" data-focus="both" aria-pressed="true">both</button><button type="button" data-focus="text" aria-pressed="false">writing</button></div></div>
   </nav>
 
   <div class="panes">
     <!-- 01 seed -->
     <section class="pane pane-seed" id="pane-seed" aria-label="Seed your map">
-      <div class="tag">01 · seed</div>
+      <div class="tag">00 · start</div>
       <h1>Find the work <em>only you</em> would make.</h1>
       <p class="lede">Your picks from Inspiration shape a gallery of work to explore. The Compass uses what it knows about your taste to find echoes and surprising connections. The map, checkpoints, and logbook are here when you want to go deeper.</p>
       <div class="setup">
@@ -342,7 +380,7 @@ details.key .legend { position: absolute; right: 0; bottom: 28px; width: 270px; 
             <div class="hint" id="nowtxt"></div>
           </div>
         </div>
-        <div><button class="btn big" id="go" type="button">Chart my map →</button></div>
+        <div><button class="btn big" id="go" type="button">Find new directions →</button></div>
       </div>
     </section>
 
@@ -355,15 +393,17 @@ details.key .legend { position: absolute; right: 0; bottom: 28px; width: 270px; 
           <div class="gallery-title" id="gallery-title" aria-live="polite"><small class="gallery-label"></small><strong></strong><span></span><div class="gallery-dials" aria-label="This room's design dials, scored by CLIP"></div></div>
           <div class="gallery-hud gallery-hud--top">
             <button type="button" class="gallery-exit" id="gallery-exit">← Sections</button>
+            <div class="uc-showme uc-showme--gallery" role="group" aria-label="Show me"><span>show me</span><div class="uc-seg"><button type="button" data-focus="photo" aria-pressed="false">photos</button><button type="button" data-focus="both" aria-pressed="true">both</button><button type="button" data-focus="text" aria-pressed="false">writing</button></div></div>
             <div class="gallery-room"><span class="gallery-label" id="gallery-progress" aria-live="polite">room 01</span><b id="gallery-room-name"></b></div>
           </div>
           <div class="gallery-opening" id="gallery-opening">
-            <div class="tag">02 · your gallery</div>
+            <div class="tag">01 · your gallery</div>
             <h2>Walk toward what moves you.</h2>
             <p id="gallery-intro">Your liked works will be grouped into rooms by how they look and read.</p>
             <span class="gallery-label">Scroll to begin</span>
             <div class="gallery-loader" aria-hidden="true"><span id="gallery-load">0</span></div>
           </div>
+          <div class="gallery-end" id="gallery-end" aria-hidden="true"><small class="gallery-label">the end of your walk · where next?</small><div><button type="button" id="gallery-write" tabindex="-1">Write from this room →</button><button type="button" id="gallery-explore" tabindex="-1">Explore further →</button></div></div>
           <div class="gallery-scroll-cue gallery-label" id="gallery-tip">Scroll to walk on the water · move your cursor to look · select a work</div>
           <div class="gallery-hud gallery-hud--bottom">
             <div class="gallery-caption" id="gallery-caption" aria-live="polite"><strong></strong><small></small></div>
@@ -385,13 +425,13 @@ details.key .legend { position: absolute; right: 0; bottom: 28px; width: 270px; 
       <div class="mapbox">
         <canvas id="map" aria-label="Three-dimensional taste map with fog, works, your gallery rooms, and planned routes"></canvas>
         <div class="map-tip" id="map-tip" hidden></div>
-        <div class="status" id="status">Example seed loaded. Press "Chart my map".</div>
+        <div class="status" id="status">Warm high ground is what you love; fog is where the Compass isn't sure yet. Press “Find new directions”.</div>
         <div class="hud">
-          <div class="stat"><b id="sQ">0</b><span>questions</span></div>
-          <div class="stat"><b id="sU">–</b><span>route fog</span></div>
-          <div class="stat"><b id="sR">0</b><span>reroutes</span></div>
+          <div class="stat"><b id="sQ">0</b><span>questions asked</span></div>
+          <div class="stat"><b id="sU">–</b><span>still unsure</span></div>
+          <div class="stat"><b id="sR">0</b><span>new routes</span></div>
         </div>
-        <div class="map-cta" id="map-cta"><button class="btn big" id="go-map" type="button">Chart my map →</button></div>
+        <div class="map-cta" id="map-cta"><button class="btn big" id="go-map" type="button">Find new directions →</button></div>
         <div class="how-to">drag to turn · move the cursor to clear the fog · click to send a signal · double-click to reset the view</div>
         <details class="key">
           <summary>key</summary>
@@ -414,17 +454,18 @@ details.key .legend { position: absolute; right: 0; bottom: 28px; width: 270px; 
     <!-- 04 checkpoint -->
     <section class="pane pane-cp" id="pane-checkpoint" aria-label="Checkpoint" hidden>
       <div class="cpwide" id="cp" aria-live="polite">
-        <div class="tag">04 · checkpoint</div>
+        <div class="tag">02 · explore · checkpoint</div>
         <h2>Nothing to ask yet</h2>
         <p class="imgline">When a route runs into fog, the Compass stops, shows what already exists nearby and what could exist there, and asks how you feel about it. Chart your map and it will bring you here.</p>
         <p style="margin-top:22px"><a class="btn" href="#" data-go-pane="map">Go to the map →</a></p>
       </div>
       <div class="cp-cursor" id="cp-cursor" aria-hidden="true"><span>LOOK</span></div>
+      <div class="near-progress" id="near-progress" aria-hidden="true" hidden><b></b><span></span><i></i></div>
     </section>
 
     <!-- 05 logbook -->
     <section class="pane pane-log" id="pane-logbook" aria-label="Logbook" hidden>
-      <div class="tag">05 · logbook</div>
+      <div class="tag">03 · logbook</div>
       <div class="loggrid">
         <div>
           <h2>Your trail</h2>
@@ -438,7 +479,7 @@ details.key .legend { position: absolute; right: 0; bottom: 28px; width: 270px; 
             <li><b>Taste with uncertainty.</b> A Bayesian logistic model spans the whole map. It keeps a best guess of what you like <i>and</i> how unsure it is everywhere. The fog you see is that uncertainty; the hills are its best guess.</li>
             <li><b>Uncharted spots.</b> It looks for places your taste rates highly (or might, if it's unsure) where few existing works sit. Those blank areas are the targets.</li>
             <li><b>Route search.</b> A* plans a path from where you are now to each target. Walking through areas you dislike costs more, so two people get different routes.</li>
-            <li><b>Checkpoints only when they matter.</b> It stops at the foggiest point on the route, where your answer teaches it the most (active learning). Love, closer, no and weirder each update the model, and the routes replan live.</li>
+            <li><b>Checkpoints only when they matter.</b> It stops at the foggiest point on the route, where your answer teaches it the most (active learning). ♥ More like these, × Not for me and Weirder each update the model, and the routes replan live.</li>
             <li><b>Arrival.</b> When the fog along the route clears, it has found a place and time that never existed, built from your blend of themes. That becomes your assignment, for a photo or for writing.</li>
           </ol>
           <p>Everything here runs in your browser. The map is built from CLIP embeddings of every photo and passage in the archive, and it starts from the picks and hearts you made in Another Angle. Your votes here train the same taste model, so your feed gets better too.</p>

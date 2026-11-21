@@ -46,22 +46,49 @@
 
   <main>
     <section id="view-start" class="view" hidden>
+      <div class="showme" role="group" aria-label="Show me">
+        <span class="showme-label">Show me</span>
+        <div class="seg">
+          <button type="button" data-focus="photo" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="1"/><circle cx="12" cy="12.5" r="3.5"/><path d="M8 6l1.5-2h5L16 6"/></svg>Photos</button>
+          <button type="button" data-focus="both" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="8" height="16" rx="1"/><path d="M14 7h7M14 11h7M14 15h5"/></svg>Photos + writing</button>
+          <button type="button" data-focus="text" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 11h14M5 15h10M5 19h7"/></svg>Writing</button>
+        </div>
+      </div>
       <div class="intro">
         <h1 data-lens>Pick what moves you.</h1>
-        <p>Choose at least 8 photos or passages that catch your eye. Your picks shape what appears in your feed, and every heart or skip helps it learn as you explore.</p>
+        <p id="pick-intro">Pick at least 8 that catch your eye. 8 is a start, and the more you pick, the closer your feed gets. They don't have to be on one page: pick what you like here, then show different ones, and your picks come with you.</p>
       </div>
       <div class="pick-grid" id="pick-grid"></div>
       <div class="pick-bar">
-        <span id="pick-count">0 of 8 picked</span>
+        <div class="pick-tray" id="pick-tray" aria-label="Your picks so far"></div>
+        <span id="pick-count">0 of 8 picked · 8 to go</span>
         <button class="btn ghost" id="pick-more">Show different ones</button>
         <button class="btn solid" id="pick-done" disabled>Show my inspiration</button>
       </div>
     </section>
 
     <section id="view-feed" class="view" hidden>
+      <div class="showme" role="group" aria-label="Show me">
+        <span class="showme-label">Show me</span>
+        <div class="seg">
+          <button type="button" data-focus="photo" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="1"/><circle cx="12" cy="12.5" r="3.5"/><path d="M8 6l1.5-2h5L16 6"/></svg>Photos</button>
+          <button type="button" data-focus="both" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="8" height="16" rx="1"/><path d="M14 7h7M14 11h7M14 15h5"/></svg>Photos + writing</button>
+          <button type="button" data-focus="text" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 11h14M5 15h10M5 19h7"/></svg>Writing</button>
+        </div>
+      </div>
       <div class="feed-head">
         <div id="mode" class="mode"></div>
-        <button class="btn ghost small" id="retrain">Pick again</button>
+        <button class="btn ghost small" id="retrain" title="Your earlier picks are kept">Pick more</button>
+      </div>
+      <div class="taste" id="taste" hidden>
+        <p class="taste-line"><span class="taste-label">Your taste, read by CLIP</span> <em id="taste-words"></em>
+          <button class="btn ghost small" id="taste-toggle" type="button" aria-expanded="false" aria-controls="taste-dials">Steer</button></p>
+        <div class="taste-dials" id="taste-dials" hidden></div>
+      </div>
+      <div class="next-step" id="next-step" hidden>
+        <p><b>Your picks just built a gallery.</b> Walk through rooms CLIP designed from your taste, then explore where it points next.</p>
+        <a class="btn solid small" href="uncharted.html" id="next-step-go">Walk through it →</a>
+        <button type="button" class="next-step-x" id="next-step-x" aria-label="Dismiss">×</button>
       </div>
       <div class="masonry" id="feed"></div>
       <div id="more" class="more">Loading more…</div>
@@ -112,6 +139,17 @@
   </main>
 
   <div class="toast" id="toast" role="status" hidden></div>
+
+  <!-- the moment after you pick: your picks gather, CLIP reads them on the design dials, your taste in words -->
+  <div class="reveal" id="reveal" hidden aria-live="polite">
+    <div class="reveal-picks" aria-hidden="true"></div>
+    <div class="reveal-center">
+      <p class="reveal-kicker">Reading your taste…</p>
+      <div class="reveal-dials" aria-hidden="true"></div>
+      <div class="reveal-words"><strong></strong><small></small></div>
+    </div>
+    <button class="btn ghost small reveal-skip" type="button">Skip</button>
+  </div>
 
   <footer class="foot">
     Images and texts are public domain, from the Library of Congress, the Art Institute of Chicago, The Met and Project Gutenberg. The AI runs in your browser; nothing you add leaves your device.

@@ -205,7 +205,7 @@ function tipHTML(room, cell){
   const describe=(window.UNCHARTED_BRIDGE||{})['compass.describe']; if (!describe) return '';
   const [u,v]=cellUV(cell), d=describe(u,v);
   const words = d.empty ? '<span class="map-tip-words">uncharted · no works here yet</span>' : d.words.length ? `<span class="map-tip-words">${d.words.map(e).join(' · ')}</span>` : '<span class="map-tip-words">a mix of everything</span>';
-  const thumbs = d.works.map(w=>w.img?`<img src="${e(w.img)}" alt="" referrerpolicy="no-referrer">`:`<span class="map-tip-page">${e(w.title.slice(0,40))}</span>`).join('');
+  const thumbs = d.works.map(w=>w.img?`<img src="${e(w.img)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">`:`<span class="map-tip-page">${e(w.title.slice(0,40))}</span>`).join('');
   return `<small>${d.empty?'open ground':'this area'}</small>${words}<div class="map-tip-works">${thumbs}</div><span class="map-tip-names">nearest: ${d.works.map(w=>e(w.title.slice(0,38))).join(' · ')}</span>`;
 }
 function updateTip(){
@@ -351,33 +351,47 @@ const $=id=>document.getElementById(id);
 let history=[], reroutes=0, current=null, busy=false;
 // ---------- sections: seed, map, checkpoint, logbook. One on screen at a time; the rail switches. ----------
 const PANES=['seed','gallery','map','checkpoint','logbook']; let pane=DATA && DATA.trained>=8?'gallery':'seed', paneTimer=0;
+// Checkpoints are part of "explore" (the map), so they light up its rail item instead of their own.
+const railOf = name => name==='checkpoint' ? 'map' : name;
 function go(name){ clearTimeout(paneTimer); pane=name;
   document.querySelector('.shell').classList.toggle('gallery-mode', name==='gallery');
-  PANES.forEach(n=>{ $('pane-'+n).hidden = n!==name; const b=document.querySelector(`.rail [data-pane="${n}"]`); if (n===name){ b.setAttribute('aria-current','true'); b.removeAttribute('data-new'); } else b.removeAttribute('aria-current'); });
+  PANES.forEach(n=>{ $('pane-'+n).hidden = n!==name; });
+  document.querySelectorAll('.rail [data-pane]').forEach(b=>{ if (b.dataset.pane===railOf(name)){ b.setAttribute('aria-current','true'); b.removeAttribute('data-new'); } else b.removeAttribute('aria-current'); });
   if (name==='gallery' && document.activeElement?.closest('.rail')) $('gallery-stage').focus({preventScroll:true});
   if (name==='map') requestAnimationFrame(resize); window.scrollTo(0,0); if (name==='checkpoint') queueSpiral(); }
-function flag(name){ if (pane!==name) document.querySelector(`.rail [data-pane="${name}"]`).setAttribute('data-new','1'); }
+function flag(name){ if (railOf(pane)!==railOf(name)) document.querySelector(`.rail [data-pane="${railOf(name)}"]`).setAttribute('data-new','1'); }
+// Once you've picked works in Inspiration, the start step isn't needed: the rail begins at your gallery.
+if (DATA && DATA.trained>=8) document.querySelector('.rail [data-pane="seed"]').hidden=true;
 let spiralFrame=0;
 function queueSpiral(){ if (!spiralFrame) spiralFrame=requestAnimationFrame(updateSpiral); }
+// Checkpoint works sit in one straight column. As you scroll, the work in the middle of the screen
+// comes into focus like a camera lens pulling focus: sharp, full size and lit, while the ones above and
+// below soften, dim and shrink a little. A counter at the side says which one you're on.
 function updateSpiral(){
   spiralFrame=0;
-  if (pane!=='checkpoint') return;
-  const items=document.querySelectorAll('#cp .near-item'), vh=window.innerHeight||1;
-  const maxX=window.innerWidth < 620 ? Math.min(10, window.innerWidth*.025) : Math.min(190, window.innerWidth*.13);
+  const prog=$('near-progress');
+  if (pane!=='checkpoint'){ if (prog) prog.hidden=true; return; }
+  const items=[...document.querySelectorAll('#cp .near-item')], vh=window.innerHeight||1;
   const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
-  items.forEach(item=>{
-    const i=Number(item.dataset.spiral)||0;
-    const rect=item.getBoundingClientRect(), depth=(rect.top+rect.height/2-vh*.52)/(vh*.9);
-    const phase=depth*Math.PI*1.45+i*Math.PI*.72;
-    const x=reduce?Math.sin((i+1)*Math.PI/2)*maxX*.75:Math.sin(phase)*maxX;
-    const yaw=reduce?0:Math.sin(phase)*7;
-    const rotation=reduce?Math.cos((i+1)*Math.PI/2)*3:Math.cos(phase)*3;
-    const scale=reduce?1:1-Math.min(1,Math.abs(depth))*.055;
-    item.style.setProperty('--spiral-x', `${x.toFixed(1)}px`);
-    item.style.setProperty('--spiral-yaw', `${yaw.toFixed(1)}deg`);
-    item.style.setProperty('--spiral-rotation', `${rotation.toFixed(1)}deg`);
-    item.style.setProperty('--spiral-scale', scale.toFixed(3));
+  let focusI=0, best=Infinity;
+  items.forEach((item,i)=>{
+    const rect=item.getBoundingClientRect(), off=(rect.top+rect.height/2-vh*.5)/(vh*.6);
+    if (Math.abs(off)<best){ best=Math.abs(off); focusI=i; }
+    const d=Math.min(1,Math.abs(off)), e=d*d*(3-2*d);
+    item.style.setProperty('--focus-scale', reduce?'1':(1-e*.07).toFixed(3));
+    item.style.setProperty('--focus-blur', reduce?'0px':`${(e*4.5).toFixed(2)}px`);
+    item.style.setProperty('--focus-dim', (1-e*.62).toFixed(3));
   });
+  items.forEach((item,i)=>item.classList.toggle('is-focus', i===focusI));
+  if (!prog) return;
+  const near=document.querySelector('#cp .near'), r=near?.getBoundingClientRect();
+  const inView = items.length>1 && r && r.top<vh*.6 && r.bottom>vh*.4;
+  prog.hidden=!inView;
+  if (!inView) return;
+  const pad=n=>String(n).padStart(2,'0'), item=items[focusI];
+  prog.querySelector('b').textContent=`${pad(focusI+1)} / ${pad(items.length)}`;
+  prog.querySelector('span').textContent=item.classList.contains('near-passage')?'writing':'photograph';
+  prog.querySelector('i').replaceChildren(...items.map((_,k)=>{ const t=document.createElement('em'); if (k===focusI) t.className='on'; return t; }));
 }
 window.addEventListener('scroll', queueSpiral, {passive:true});
 window.addEventListener('resize', queueSpiral);
@@ -434,7 +448,7 @@ function tick(){
   requestAnimationFrame(tick);
 }
 async function ask(cell, label = `Checkpoint ${history.length+1}`, statusText = null){
-  $('status').textContent = statusText || `Checkpoint: this area is uncertain (${(Math.min(1,SD[cell]/SD0)*100).toFixed(0)}%). Review the nearby works.`;
+  $('status').textContent = statusText || `The Compass isn't sure about this area yet (${(Math.min(1,SD[cell]/SD0)*100).toFixed(0)}% unsure). Tell it how these feel.`;
   $('cp').innerHTML = `<div class="tag">${esc(label)}</div><h2 class="thinking">Finding nearby works…</h2>`;
   const nearby = await nearest(cell);
   current = {cell, title: nearby.title};
@@ -443,13 +457,12 @@ async function ask(cell, label = `Checkpoint ${history.length+1}`, statusText = 
     <div class="cp-nearby"><div class="col-h">Proposed works · mark each one</div>${nearby.html || '<p class="imgline">No archive data loaded yet.</p>'}</div>
     <div class="cp-feedback"><div class="col-h">How do you feel about this collection?</div>
     <div class="cp-feedback-actions"><div class="answers">
-      <button class="ans" id="a-love" type="button">Love it<kbd>1</kbd></button>
-      <button class="ans" id="a-closer" type="button">Closer<kbd>2</kbd></button>
-      <button class="ans" id="a-no" type="button">Not me<kbd>3</kbd></button>
-      <button class="ans" id="a-weird" type="button">Weirder<kbd>4</kbd></button>
+      <button class="ans" id="a-love" type="button">♥ More like these<kbd>1</kbd></button>
+      <button class="ans" id="a-no" type="button">× Not for me<kbd>2</kbd></button>
+      <button class="ans" id="a-weird" type="button">Weirder →<kbd>3</kbd></button>
     </div></div></div></div>`;
   showCp();
-  $('a-love').onclick=()=>answer('love'); $('a-closer').onclick=()=>answer('closer'); $('a-no').onclick=()=>answer('no'); $('a-weird').onclick=()=>answer('weirder');
+  $('a-love').onclick=()=>answer('love'); $('a-no').onclick=()=>answer('no'); $('a-weird').onclick=()=>answer('weirder');
 }
 async function nearest(cell){
   if (!DATA) return {title: "Nearby works", html: ""};
@@ -466,21 +479,22 @@ async function nearest(cell){
   return {
     title,
     html: `<div class="near" aria-label="Nearby archive works">
-      <svg class="near-spiral-trace" viewBox="0 0 100 1200" preserveAspectRatio="none" aria-hidden="true"><path d="M50 0 C86 45 93 105 50 150 C7 195 14 255 50 300 C86 345 93 405 50 450 C7 495 14 555 50 600 C86 645 93 705 50 750 C7 795 14 855 50 900 C86 945 93 1005 50 1050 C7 1095 14 1155 50 1200"/></svg>
-      ${photos.map((p,i)=>`<figure class="near-item near-photo" data-spiral="${i}"><img src="${esc(p.src)}" alt="${esc(p.title)}"><figcaption class="near-caption"><span class="near-kind">photograph</span><strong class="near-title">${esc(p.title)}</strong><span class="near-credit">${esc(p.credit)}</span></figcaption>${voteBtns(0, p.id)}</figure>`).join('')}
+      ${photos.map((p,i)=>`<figure class="near-item near-photo" data-spiral="${i}"><img src="${esc(p.src)}" alt="${esc(p.title)}" onerror="this.closest('.near-item').remove()"><figcaption class="near-caption"><span class="near-kind">photograph</span><strong class="near-title">${esc(p.title)}</strong><span class="near-credit">${esc(p.credit)}</span></figcaption>${voteBtns(0, p.id)}</figure>`).join('')}
       ${passages.map((p,i)=>`<article class="near-item near-passage" data-spiral="${photos.length+i}"><span class="near-kind">writing</span><h3 class="near-title">${esc(p.title)}</h3><blockquote class="near-quote">${esc(p.text)}</blockquote><p class="near-credit">${esc(p.credit)}</p>${voteBtns(1, p.id)}</article>`).join('')}
     </div>`,
   };
 }
 function voteBtns(kind, id){ if (id==null) return '';
-  return `<div class="vote"><button type="button" class="v" data-k="${kind}" data-i="${id}" data-g="1">On track</button><button type="button" class="v" data-k="${kind}" data-i="${id}" data-g="0">Off track</button></div>`; }
+  return `<div class="vote"><button type="button" class="v" data-k="${kind}" data-i="${id}" data-g="1">♥ Save</button><button type="button" class="v" data-k="${kind}" data-i="${id}" data-g="0">× Less like this</button></div>`; }
+// How each answer reads in the logbook (older journeys may also contain "closer").
+const ANSWER_LABEL = {love:'♥ more like these', closer:'closer', no:'× not for me', weirder:'weirder →'};
 document.addEventListener('click', e=>{ const b = e.target.closest('button.v'); if (!b) return;
   const kind=+b.dataset.k, id=+b.dataset.i, good=b.dataset.g==='1';
   const w = WORKS.find(q=>q.kind===kind && q.id===id); if (!w) return;
   const o = {x:w.x, y:w.y, yv:good?1:0, w:1.0}; obs.push(o); journey.obs.push(o); fit(); saveJourney();
   callPy('compass.vote', [kind, id, good]);
   b.parentElement.querySelectorAll('button.v').forEach(q=>{ q.dataset.on = q===b ? '1' : '0'; q.disabled = true; });
-  $('status').textContent = good ? 'Noted: that one is on track. The map warmed around it.' : 'Noted: off track. That area is now less likely, and it won\'t show again.';
+  $('status').textContent = good ? 'Saved. The map warmed around it.' : 'Less like that. That area cools, and it won\'t show again.';
 });
 function showCp(){ flag('checkpoint'); if (pane==='map'){ clearTimeout(paneTimer); paneTimer=setTimeout(()=>go('checkpoint'), REDUCE?0:2200); } }
 function esc(s){ return String(s??'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -491,7 +505,7 @@ function answer(a){
   if (a==='weirder'){ kappa += .6; BETA += .4; }
   history.push({title: current.title, ans: a});
   journey.trail.push({title: current.title, ans: a, when: new Date().toISOString().slice(0,10)}); saveJourney();
-  const li=document.createElement('li'); li.innerHTML=`<span>${esc(current.title)}</span><span>${a}</span>`; $('trail').appendChild(li); $('trailcard').hidden=false; $('trail-empty').hidden=true;
+  const li=document.createElement('li'); li.innerHTML=`<span>${esc(current.title)}</span><span>${esc(ANSWER_LABEL[a]||a)}</span>`; $('trail').appendChild(li); $('trailcard').hidden=false; $('trail-empty').hidden=true;
   $('sQ').textContent = history.length;
   fit(); reroutes++; $('sR').textContent = reroutes;
   const from = (a==='love'||a==='closer') ? c : anim.start;   // move forward only when the step felt right
@@ -502,7 +516,7 @@ function answer(a){
 function arrive(s){
   anim.arrived = true; const end = s.path[s.path.length-1];
   journey.paths.push(s.path.filter((c,k)=>k%2===0 || k===s.path.length-1).map(cellXY)); journey.paths = journey.paths.slice(-12); saveJourney(); anim.cp = end;
-  const status = `Arrived. The fog along your route is down to ${(routeFog(s.path)*100).toFixed(0)}%.`;
+  const status = `Arrived. Along this route the Compass is now only ${(routeFog(s.path)*100).toFixed(0)}% unsure.`;
   ask(end, "Destination collection", status);
 }
 function start(){
@@ -510,8 +524,8 @@ function start(){
   rnd = mulberry(7 + history.length); history=[]; reroutes=0; kappa=1; BETA=.9; anim.arrived=false;
   $('trail').innerHTML=''; $('trailcard').hidden=true; $('trail-empty').hidden=false; $('sQ').textContent='0'; $('sR').textContent='0';
   seedObs(); fit(); busy=true;
-  $('status').textContent='Searching for uncharted places your taste points to…';
-  $('cp').innerHTML = `<div class="tag">Checkpoint</div><h2>Searching…</h2><p class="imgline">Three routes are growing toward three empty spots. The Compass will stop where the best route is foggiest, and bring you here to ask.</p>`;
+  $('status').textContent='Looking for places your taste points to that nothing in the archive covers yet…';
+  $('cp').innerHTML = `<div class="tag">Checkpoint</div><h2>Searching…</h2><p class="imgline">Three routes are heading toward three empty spots your taste points to. Where the Compass is least sure along the way, it stops and brings you here to ask.</p>`;
   plan(startCell()); $('map-cta').hidden=true; go('map');
 }
 window.addEventListener('compass:gallery-vote', e=>{
@@ -522,14 +536,14 @@ window.addEventListener('compass:gallery-vote', e=>{
   fit();
   if (busy){ anim.arrived=false; plan(anim.start ?? startCell()); $('status').textContent='Your gallery choice updated the model. Replanning the routes…'; }
 });
-document.addEventListener('keydown', e=>{ if (e.target.tagName==='INPUT') return; const m={'1':'love','2':'closer','3':'no','4':'weirder'}[e.key]; if (m && current && pane==='checkpoint') answer(m); });
+document.addEventListener('keydown', e=>{ if (e.target.tagName==='INPUT') return; const m={'1':'love','2':'no','3':'weirder'}[e.key]; if (m && current && pane==='checkpoint') answer(m); });
 $('go').onclick=start; $('go-map').onclick=start;
 
 // initial resting frame: prior fog with the example seed applied, no search yet
 obs=[]; fit(); SD0 = Math.max(...SD); seedObs(); fit();
 $('trail-empty').hidden = journey.trail.length>0;
-if (journey.trail.length){ journey.trail.slice(-5).forEach(t=>{ const li=document.createElement('li'); li.innerHTML=`<span>${esc(t.title)}</span><span>${esc(t.ans)} · ${esc(t.when||'')}</span>`; $('trail').appendChild(li); }); $('trailcard').hidden=false; }
-if (DATA){ $('kindlegend').hidden=false; if (DATA.trained) $('status').textContent = `Seeded with ${DATA.trained} of your Another Angle picks. Press "Chart my map".`; }
+if (journey.trail.length){ journey.trail.slice(-5).forEach(t=>{ const li=document.createElement('li'); li.innerHTML=`<span>${esc(t.title)}</span><span>${esc(ANSWER_LABEL[t.ans]||t.ans)} · ${esc(t.when||'')}</span>`; $('trail').appendChild(li); }); $('trailcard').hidden=false; }
+if (DATA){ $('kindlegend').hidden=false; if (DATA.trained) $('status').textContent = `Built from your ${DATA.trained} picks. Warm high ground is what you love; fog is where the Compass isn't sure. Press “Find new directions” and it heads for places nothing in the archive covers yet, stopping in the fog to ask you.`; }
 if (journey.obs.length) $('status').textContent = `Welcome back. Your map remembers ${journey.obs.length} answer${journey.obs.length===1?"":"s"} and ${journey.blocks.length} block${journey.blocks.length===1?"":"s"} from ${journey.sessions} session${journey.sessions===1?'':'s'}.`;
 go(pane);
 window.addEventListener('resize', resize); if (window.ResizeObserver) new ResizeObserver(()=>{ if (Math.abs(cv.getBoundingClientRect().width-CW)>1) resize(); }).observe(cv); resize(); requestAnimationFrame(tick);

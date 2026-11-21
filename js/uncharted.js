@@ -7,6 +7,7 @@ import { loadArchive, normalize, dot } from "./data.js";
 import { TasteModel } from "./taste.js";
 import { mergeInto } from "./mine.js";
 import { initGallery, loadDials } from "./uncharted_gallery.js";
+import { getFocus, wireFocusButtons } from "./focus.js";
 
 function pcaLayout(items) {
   // Fallback when the data has no t-SNE layout: the two main directions of variation.
@@ -122,6 +123,7 @@ function readLand(items, dials) {
 }
 
 async function main() {
+  wireFocusButtons();
   let A;
   try { A = await loadArchive(); } catch (e) { console.error(e); A = null; }
   if (A && A.themes.length) {
@@ -168,16 +170,22 @@ async function main() {
         const q = new Float32Array(A.dim);
         themes.forEach((t, k) => { for (let d = 0; d < A.dim; d++) q[d] += tw[k] * t.vec[d]; });
         normalize(q);
-        const nearbyPassage = ids.filter(([kind, id]) => kind === 1 && !seen.has(id)).map(([, id]) => items[id]).find(Boolean);
-        const passage = nearbyPassage || items.filter((it) => it.kind === "text" && !seen.has(it.index))
-          .map((it) => [dot(it.vec, q), it]).sort((a, b) => b[0] - a[0])[0]?.[1];
-        if (passage) { for (let d = 0; d < A.dim; d++) q[d] += 0.7 * passage.vec[d]; normalize(q); }
-        const photos = items.filter((it) => it.kind === "photo" && !seen.has(it.index))
-          .map((it) => [dot(it.vec, q), it]).sort((a, b) => b[0] - a[0]).slice(0, 2).map(([, it]) => it);
+        // Photos, writing, or both (the "Show me" switch): three works either way.
+        const focus = getFocus();
+        const nearest = (kind, n) => items.filter((it) => it.kind === kind && !it.mine && !seen.has(it.index))
+          .map((it) => [dot(it.vec, q), it]).sort((a, b) => b[0] - a[0]).slice(0, n).map(([, it]) => it);
+        let passages = [];
+        if (focus === "text") passages = nearest("text", 3);
+        else if (focus === "both") {
+          const nearbyPassage = ids.filter(([kind, id]) => kind === 1 && !seen.has(id)).map(([, id]) => items[id]).find(Boolean);
+          const passage = nearbyPassage || nearest("text", 1)[0];
+          if (passage) { passages = [passage]; for (let d = 0; d < A.dim; d++) q[d] += 0.7 * passage.vec[d]; normalize(q); }
+        }
+        const photos = focus === "text" ? [] : nearest("photo", focus === "photo" ? 3 : 2);
         const credit = (it) => [it.creator, it.date, it.source].filter(Boolean).join(" · ");
         return {
           photos: photos.map((it) => ({ src: it.img, title: it.title || "Untitled photograph", credit: credit(it), id: it.index })),
-          passages: passage ? [{ text: passage.text.split(/\s+/).slice(0, 55).join(" ") + "…", title: passage.title || "Untitled passage", credit: credit(passage), id: passage.index }] : [],
+          passages: passages.map((it) => ({ text: it.text.split(/\s+/).slice(0, 55).join(" ") + "…", title: it.title || "Untitled passage", credit: credit(it), id: it.index })),
         };
       },
       // On/off track trains the same taste model as the feed.
