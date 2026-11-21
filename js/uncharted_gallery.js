@@ -328,6 +328,7 @@ uniform float uType; // 0 rocky, 1 living (Earth), 2 gas and ice giants
 uniform vec3 uA;
 uniform vec3 uB;
 uniform float uIce;
+uniform float uOpacity;
 varying vec3 vObj;
 varying vec3 vWN;
 varying vec3 vWPos;
@@ -353,8 +354,11 @@ void main() {
     col = mix(ocean, ground, land);
     cloud = smoothstep(0.6, 0.82, fbm(n * 11.0 + vec3(uTime * 0.01, 0.0, uTime * 0.005)));
   } else { // banded gas and ice
-    float band = sin(n.y * 26.0 + fbm(n * vec3(3.0, 12.0, 3.0) + vec3(uTime * 0.02, 0.0, 0.0)) * 4.0);
-    col = mix(uA, uB, 0.5 + 0.5 * band);
+    // soft latitude bands, gently warped, with a finer second set of bands on top
+    float warp = fbm(n * vec3(2.0, 6.0, 2.0) + vec3(uTime * 0.015, 0.0, 0.0)) - 0.5;
+    float band = 0.5 + 0.5 * sin(n.y * 14.0 + warp * 2.2);
+    float fine = 0.5 + 0.5 * sin(n.y * 41.0 + warp * 4.0);
+    col = mix(uA, uB, smoothstep(0.15, 0.85, band) * 0.75 + fine * 0.25);
   }
   col = mix(col, vec3(0.9, 0.93, 0.97), uIce * smoothstep(0.82, 0.93, abs(n.y) + (h - 0.5) * 0.3));
   col = mix(col, vec3(0.95), cloud * 0.7);
@@ -365,9 +369,11 @@ void main() {
   float city = land * (1.0 - cloud) * step(0.84, noise(n * 160.0)) * (1.0 - day);
   lit += vec3(1.0, 0.72, 0.38) * city * 0.9;
   vec3 V = normalize(cameraPosition - vWPos);
-  float rim = pow(1.0 - max(dot(N, V), 0.0), 3.0);
+  float facing = max(dot(N, V), 0.0);
+  lit *= 0.55 + 0.45 * pow(facing, 0.6); // limb darkening: edges fall off softly
+  float rim = pow(1.0 - facing, 3.0);
   lit += uTint * rim * (0.1 + 0.55 * day);
-  gl_FragColor = vec4(lit, 1.0);
+  gl_FragColor = vec4(lit, uOpacity);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }`;
@@ -386,6 +392,7 @@ const PLANETS = [
 const ATMOSPHERE_FRAGMENT = /* glsl */`
 uniform vec3 uSunDir;
 uniform vec3 uTint;
+uniform float uOpacity;
 varying vec3 vObj;
 varying vec3 vWN;
 varying vec3 vWPos;
@@ -394,7 +401,7 @@ void main() {
   vec3 N = normalize(vWN);
   float f = pow(1.0 - abs(dot(N, V)), 2.2);
   float day = smoothstep(-0.35, 0.4, dot(N, uSunDir));
-  gl_FragColor = vec4(uTint * f * (0.25 + day) * 0.7, 1.0);
+  gl_FragColor = vec4(uTint * f * (0.25 + day) * 0.7 * uOpacity, 1.0);
 }`;
 
 // The last step of the cinematic finish: a soft vignette and fine film grain, applied after tone mapping.
@@ -1197,16 +1204,18 @@ export function initGallery(items, model, themes = []) {
     const SUN_POS = new THREE.Vector3(-55, 18, -60); // ahead and to the left as you set off
     function buildPlanet(group, spec, center, glowTint) {
       const uniforms = {
-        uSunDir: { value: SUN_POS.clone().sub(center).normalize() }, uTint: { value: new THREE.Color(...spec.atmo).lerp(glowTint, 0.15) },
+        // lit from the path side, so you see its day side
+        uSunDir: { value: new THREE.Vector3(-(center.userData?.side || 1) * 0.6, 0.4, 0.55).normalize() }, uTint: { value: new THREE.Color(...spec.atmo).lerp(glowTint, 0.15) },
         uTime: { value: 0 }, uType: { value: spec.type }, uA: { value: new THREE.Color(...spec.a) }, uB: { value: new THREE.Color(...spec.b) }, uIce: { value: spec.ice || 0 },
+        uOpacity: { value: 0 },
       };
       const holder = new THREE.Group();
-      const surface = new THREE.Mesh(track(new THREE.SphereGeometry(spec.r, 128, 64)), track(new THREE.ShaderMaterial({ uniforms, vertexShader: PLANET_VERTEX, fragmentShader: PLANET_FRAGMENT })));
+      const surface = new THREE.Mesh(track(new THREE.SphereGeometry(spec.r, 128, 64)), track(new THREE.ShaderMaterial({ uniforms, vertexShader: PLANET_VERTEX, fragmentShader: PLANET_FRAGMENT, transparent: true })));
       surface.rotation.z = 0.2;
       holder.add(surface);
       if (spec.air > 0.2) {
         const air = new THREE.Mesh(track(new THREE.SphereGeometry(spec.r * 1.035, 96, 48)), track(new THREE.ShaderMaterial({
-          uniforms: { ...uniforms, uTint: { value: uniforms.uTint.value.clone().multiplyScalar(spec.air) } },
+          uniforms: { ...uniforms, uTint: { value: uniforms.uTint.value.clone().multiplyScalar(spec.air) }, uOpacity: uniforms.uOpacity },
           vertexShader: PLANET_VERTEX, fragmentShader: ATMOSPHERE_FRAGMENT, side: THREE.BackSide, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
         })));
         holder.add(air);
@@ -1218,25 +1227,30 @@ export function initGallery(items, model, themes = []) {
         const geo = track(new THREE.RingGeometry(spec.r * 1.35, spec.r * 2.2, 128, 1));
         const pos = geo.attributes.position, uv = geo.attributes.uv;
         for (let i = 0; i < pos.count; i++) { const d = Math.hypot(pos.getX(i), pos.getY(i)); uv.setXY(i, (d - spec.r * 1.35) / (spec.r * 0.85), 0.5); }
-        const ring = new THREE.Mesh(geo, track(new THREE.MeshBasicMaterial({ map: track(ringTex), transparent: true, side: THREE.DoubleSide, depthWrite: false })));
+        const ringMat = track(new THREE.MeshBasicMaterial({ map: track(ringTex), transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }));
+        animators.push(() => { ringMat.opacity = uniforms.uOpacity.value; });
+        const ring = new THREE.Mesh(geo, ringMat);
         ring.rotation.x = Math.PI / 2 - 0.35;
         holder.add(ring);
       }
       holder.position.copy(center);
+      holder.visible = false;
       group.add(holder);
+      planets.push({ holder, uniforms, ...center.userData });
       animators.push((t) => { surface.rotation.y = t * 0.012; uniforms.uTime.value = t; });
     }
     const sun = new THREE.Group();
     {
       const core = new THREE.Mesh(new THREE.SphereGeometry(16, 48, 24), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 1.25, 0.8), fog: false }));
-      const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture, color: 0xffd9a0, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-      halo.scale.setScalar(150);
+      const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture, color: 0xffd9a0, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      halo.scale.setScalar(80);
       sun.add(core, halo);
       sun.position.copy(SUN_POS);
       sun.visible = false;
       scene.add(sun);
     }
 
+    let planets = [];
     let world = null;
     let roomEnvs = [];
     let picks = [];
@@ -1337,6 +1351,7 @@ export function initGallery(items, model, themes = []) {
       scene.add(world);
       roomEnvs = [];
       path = [];
+      planets = [];
       const entries = [];
       let z = 0;
       for (const [index, room] of roomList.entries()) {
@@ -1351,9 +1366,12 @@ export function initGallery(items, model, themes = []) {
         else {
           const spec = PLANETS[index % PLANETS.length];
           room.planet = spec.name;
-          // each planet sits below and to one side of your path, alternating, so each one is seen on its own
-          const scaled = { ...spec, r: spec.r * 0.42 };
-          buildPlanet(group, scaled, new THREE.Vector3((index % 2 ? 1 : -1) * (scaled.r + 7), -(scaled.r * 0.55 + 6), -(z + length / 2 + 4)), c.glow);
+          // One planet at a time: it slides in ahead of you as you enter its room, off to one side (alternating),
+          // drifts slowly while you're there, and fades as the next one arrives.
+          const scaled = { ...spec, r: spec.r * 0.5 };
+          const center = new THREE.Vector3();
+          center.userData = { zc: -(z + length / 2), half: length / 2, side: index % 2 ? 1 : -1, r: scaled.r };
+          buildPlanet(group, scaled, center, c.glow);
         }
         // the galaxy comes into view: a stop as you arrive, then each work in turn
         path.push({ room: index, dwell: 2.6, z: -(z + approach * 0.35) });
@@ -1464,6 +1482,14 @@ export function initGallery(items, model, themes = []) {
       look.pitch += (look.tPitch - look.pitch) * 0.05;
       camera.position.copy(at.pos);
       if (!reducedMotion.matches) { camera.position.y += Math.sin(t * 0.5) * 0.04; camera.position.x += Math.sin(t * 0.37) * 0.03; }
+      for (const pl of planets) {
+        const rel = camera.position.z - pl.zc; // positive while you approach its room's middle
+        const w = Math.max(0, Math.min(1, 1 - (Math.abs(rel) - pl.half) / 9));
+        pl.uniforms.uOpacity.value = w * w * (3 - 2 * w);
+        pl.holder.visible = w > 0.01;
+        if (pl.holder.visible) pl.holder.position.set(pl.side * (pl.r * 0.95 + 5), -(pl.r * 0.5 + 3), camera.position.z - (pl.r * 1.5 + 22) + rel * 0.18);
+      }
+      sun.visible = galleryMode === "collection" && camera.position.z > -40;
       const dir = tmpDir.copy(at.look).sub(camera.position);
       camera.rotation.set(Math.atan2(dir.y, Math.hypot(dir.x, dir.z)) + look.pitch * 0.6, Math.atan2(-dir.x, -dir.z) + look.yaw * 0.5, 0);
 
