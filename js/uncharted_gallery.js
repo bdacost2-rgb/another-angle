@@ -578,14 +578,40 @@ export function initGallery(items, model, themes = []) {
     window.dispatchEvent(new CustomEvent("gallery:rooms"));
   }
   let pendingEntry = null;
+  let building = false;
   // Switching between photos, writing or both rebuilds the rooms (and the map's constellations).
   window.addEventListener("focus:change", () => { if (engine) build(); });
   window.addEventListener("gallery:enter-room", (event) => {
     const index = event.detail?.index;
     if (!Number.isInteger(index)) return;
-    if (layout.starts.length) changeRoom(index, true, true);
+    if (layout.starts.length && !building) changeRoom(index, true, true);
     else pendingEntry = index;
   });
+
+  // Choices made elsewhere in Uncharted (saving or dismissing works at checkpoints) change your rooms.
+  // They're counted, and when you walk back into the gallery it regroups and says what changed.
+  let changes = { saved: 0, dismissed: 0 };
+  window.addEventListener("taste:changed", (event) => {
+    if (event.detail?.good) changes.saved += 1; else changes.dismissed += 1;
+  });
+  window.addEventListener("gallery:shown", () => {
+    if (engine) requestAnimationFrame(() => engine.wake());
+    if (!engine || (!changes.saved && !changes.dismissed)) return;
+    const { saved } = changes;
+    changes = { saved: 0, dismissed: 0 };
+    build().then(() => notify(saved
+      ? `${saved} work${saved === 1 ? "" : "s"} you saved at checkpoints joined your gallery. Your rooms regrouped around them.`
+      : "Your rooms regrouped around your latest choices."));
+  });
+  const notice = $("#gallery-notice");
+  let noticeTimer = 0;
+  function notify(text) {
+    if (!notice) return;
+    notice.textContent = text;
+    notice.classList.add("is-on");
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => notice.classList.remove("is-on"), 6500);
+  }
 
   // ---------- details dialog and feedback (unchanged behavior) ----------
 
@@ -964,6 +990,7 @@ export function initGallery(items, model, themes = []) {
   }
 
   async function build() {
+    building = true;
     updateIntro();
     rooms = makeRooms();
     roomIndex = 0;
@@ -979,6 +1006,7 @@ export function initGallery(items, model, themes = []) {
     await engine.build(rooms);
     renderList();
     opening.classList.add("is-ready");
+    building = false;
     if (pendingEntry != null) { const index = pendingEntry; pendingEntry = null; requestAnimationFrame(() => changeRoom(index, true, true)); }
   }
 
@@ -1747,7 +1775,9 @@ export function initGallery(items, model, themes = []) {
 
     function frame() {
       running = false;
-      if (!visible || !roomEnvs.length) return;
+      // While the gallery's panel is hidden (you're on the map or a checkpoint) its scroll position
+      // can't be measured, so don't move the camera; wake() restarts drawing when it's shown again.
+      if (!visible || !roomEnvs.length || stage.offsetParent === null) return;
       running = true;
       requestAnimationFrame(frame);
       const dt = Math.min(0.25, clock.getDelta());
@@ -1868,7 +1898,13 @@ export function initGallery(items, model, themes = []) {
       if (hit && hit.distance < 26) showDetails(hit.object.userData.entry.item);
     });
 
-    return { build: buildRooms };
+    function wake() {
+      visible = !document.hidden;
+      resize();
+      ensureRunning();
+    }
+
+    return { build: buildRooms, wake };
   }
 
   start();

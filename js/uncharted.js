@@ -192,6 +192,8 @@ async function main() {
       "compass.vote": (kind, i, good) => {
         const it = items[i];
         if (it) T.label(it, good ? 1 : 0);
+        // the gallery listens, and regroups its rooms the next time you walk back into it
+        window.dispatchEvent(new CustomEvent("taste:changed", { detail: { good, source: "checkpoint" } }));
         return { ok: true };
       },
     };

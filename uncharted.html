@@ -161,6 +161,9 @@ details.how li { margin: 6px 0; }
 .uc-showme--gallery .uc-seg button[aria-pressed="true"]::before { content: none; }
 @media (max-width: 820px) { .uc-showme--gallery > span { display: none; } .uc-showme--gallery { top: 46px; } }
 .rail button[hidden] { display: none; }
+.gallery-notice { position: absolute; z-index: 8; left: 50%; top: 84px; max-width: min(520px, 86%); padding: 11px 18px; border: 1px solid rgba(243,236,224,.35); background: rgba(8,10,14,.82); color: var(--cream); font: 400 13px/1.45 var(--body); text-align: center; -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); opacity: 0; transform: translate(-50%, -8px); transition: opacity .5s ease, transform .6s cubic-bezier(.22,1,.36,1); pointer-events: none; }
+.gallery-notice.is-on { opacity: 1; transform: translate(-50%, 0); }
+@media (max-width: 820px) { .gallery-notice { top: 96px; } }
 .gallery-end { position: absolute; z-index: 5; left: 50%; top: 62%; display: grid; justify-items: center; gap: 12px; transform: translate(-50%, 10px); opacity: 0; pointer-events: none; transition: opacity .6s ease, transform .6s cubic-bezier(.22,1,.36,1); text-align: center; }
 .gallery-end.is-on { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
 .gallery-end small { color: rgba(243,236,224,.7); }
@@ -421,6 +424,7 @@ details.key .legend { position: absolute; right: 0; bottom: 28px; width: 270px; 
             <span class="gallery-label">Scroll to begin</span>
             <div class="gallery-loader" aria-hidden="true"><span id="gallery-load">0</span></div>
           </div>
+          <div class="gallery-notice" id="gallery-notice" role="status" aria-live="polite"></div>
           <div class="gallery-end" id="gallery-end" aria-hidden="true"><small class="gallery-label">the end of your walk · where next?</small><div><button type="button" id="gallery-write" tabindex="-1">Write from this room →</button><button type="button" id="gallery-explore" tabindex="-1">Explore further →</button></div></div>
           <div class="gallery-scroll-cue gallery-label" id="gallery-tip">Scroll to walk · click a work</div>
           <div class="gallery-hud gallery-hud--bottom">

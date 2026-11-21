@@ -358,6 +358,7 @@ function go(name){ clearTimeout(paneTimer); pane=name;
   PANES.forEach(n=>{ $('pane-'+n).hidden = n!==name; });
   document.querySelectorAll('.rail [data-pane]').forEach(b=>{ if (b.dataset.pane===railOf(name)){ b.setAttribute('aria-current','true'); b.removeAttribute('data-new'); } else b.removeAttribute('aria-current'); });
   if (name==='gallery' && document.activeElement?.closest('.rail')) $('gallery-stage').focus({preventScroll:true});
+  if (name==='gallery') window.dispatchEvent(new CustomEvent('gallery:shown'));
   if (name==='map') requestAnimationFrame(resize); window.scrollTo(0,0); if (name==='checkpoint') queueSpiral(); }
 function flag(name){ if (railOf(pane)!==railOf(name)) document.querySelector(`.rail [data-pane="${railOf(name)}"]`).setAttribute('data-new','1'); }
 // Once you've picked works in Inspiration, the start step isn't needed: the rail begins at your gallery.
@@ -500,6 +501,8 @@ function showCp(){ flag('checkpoint'); if (pane==='map'){ clearTimeout(paneTimer
 function esc(s){ return String(s??'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function answer(a){
   if (!current) return; const c=current.cell, x=(c%W+.5)/W, y=(((c/W)|0)+.5)/H;
+  // "More like these" also saves each work in the set you haven't voted on, so they join your gallery
+  if (a==='love') document.querySelectorAll('#cp button.v[data-g="1"]:not(:disabled)').forEach(b=>b.click());
   const o = a==='love' ? {x,y,yv:1,w:2.2} : a==='closer' ? {x,y,yv:1,w:.9} : a==='no' ? {x,y,yv:0,w:2.0} : {x,y,yv:1,w:.6};
   obs.push(o); journey.obs.push(o);
   if (a==='weirder'){ kappa += .6; BETA += .4; }
@@ -509,7 +512,7 @@ function answer(a){
   $('sQ').textContent = history.length;
   fit(); reroutes++; $('sR').textContent = reroutes;
   const from = (a==='love'||a==='closer') ? c : anim.start;   // move forward only when the step felt right
-  $('status').textContent = a==='no' ? 'Dead end. Raising the cost of that area and replanning…' : a==='weirder' ? 'Going stranger: favouring emptier, riskier ground…' : 'Noted. Moving forward and replanning…';
+  $('status').textContent = a==='no' ? 'Dead end. Raising the cost of that area and replanning…' : a==='weirder' ? 'Going stranger: favouring emptier, riskier ground…' : a==='love' ? 'Saved these to your gallery. Moving forward and replanning…' : 'Noted. Moving forward and replanning…';
   $('cp').innerHTML = `<div class="tag">Checkpoint</div><h2>Replanning…</h2><p class="imgline">The model updated. Watch the land reshape and the routes regrow on the map.</p>`;
   current=null; anim.arrived=false; plan(from); go('map');
 }
