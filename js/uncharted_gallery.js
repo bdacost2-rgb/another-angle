@@ -191,6 +191,7 @@ function designRooms(rooms, dials) {
       room.design = Object.fromEntries(DIAL_IDS.map((id) => [id, 0.25 + r() * 0.5]));
       room.signature = [];
     });
+    assignFloors(rooms);
     return;
   }
   const Z = rooms.map((room) => dialScores(room.works, dials));
@@ -215,6 +216,49 @@ function designRooms(rooms, dials) {
     if (j >= 0) ranked.unshift(...ranked.splice(ranked.findIndex(({ dial }) => dial === dials[j]), 1));
     room.dialRows = ranked;
     room.signature = ranked.slice(0, 3).map(({ dial, value }) => (value >= 0.5 ? dial.high : dial.low));
+  });
+  assignFloors(rooms);
+}
+
+// ---------- the ground you walk on ----------
+// Each room gets its own ground, chosen from its dials, and no two rooms share one (the same one-to-one
+// matching as the signature dials). Water is only one of eight.
+const FLOORS = ["water", "sand", "meadow", "marble", "snow", "neon", "clouds", "forest"];
+const FLOOR_LABEL = {
+  water: "still water", sand: "desert sand", meadow: "a meadow of tall grass", marble: "a marble court",
+  snow: "a snowfield", neon: "a neon grid", clouds: "a sea of clouds", forest: "a mossy forest floor",
+};
+function floorScore(D, kind) {
+  switch (kind) {
+    case "water": return D.wet * 1.2 + (1 - D.storm) * 0.15;
+    case "sand": return (1 - D.wet) * 0.9 + (1 - D.growth) * 0.4 + D.warmth * 0.4;
+    case "meadow": return D.growth * 1.0 + (1 - D.night) * 0.4 + D.warmth * 0.2;
+    case "marble": return D.order * 0.8 + (1 - D.ruin) * 0.3 + (1 - D.growth) * 0.3 + (1 - D.era) * 0.3;
+    case "snow": return (1 - D.warmth) * 1.2 + D.wet * 0.2 + (1 - D.crowd) * 0.1;
+    case "neon": return D.era * 1.0 + D.night * 0.7 + (1 - D.growth) * 0.2;
+    case "clouds": return D.float * 1.1 + D.dream * 0.6;
+    case "forest": return D.growth * 0.6 + D.night * 0.5 + D.ruin * 0.3 + (1 - D.scale) * 0.2;
+    default: return 0;
+  }
+}
+function assignFloors(rooms) {
+  const pick = matchOneToOne(rooms.map((room) => FLOORS.map((kind) => floorScore(room.design, kind))));
+  const used = new Set();
+  rooms.forEach((room, i) => {
+    room.floor = FLOORS[pick[i]] || FLOORS[i % FLOORS.length];
+    // Distinct grounds matter, but not more than fit: a pastoral room shouldn't land on a neon grid just
+    // because the meadow was taken. If the match is much worse than the room's best fit, take the best
+    // free fit that's close, or share the best one.
+    const ranked = FLOORS.map((kind) => [kind, floorScore(room.design, kind)]).sort((a, b) => b[1] - a[1]);
+    const best = ranked[0][1];
+    if (floorScore(room.design, room.floor) < best * 0.6) {
+      const taken = new Set(rooms.map((_, k) => (k === i ? null : FLOORS[pick[k]])).filter(Boolean));
+      room.floor = (ranked.find(([kind, v]) => v >= best * 0.85 && !taken.has(kind) && !used.has(kind)) || ranked[0])[0];
+    }
+    used.add(room.floor);
+    // say why, in plain words, in the "why this room?" panel
+    const lean = FLOORS.map((kind) => [kind, floorScore(room.design, kind)]).sort((a, b) => b[1] - a[1]);
+    room.floorNote = `You walk on ${FLOOR_LABEL[room.floor]}${lean[0][0] === room.floor ? ", the ground that fits these works best" : ", a ground that suits these works (another room claimed its first choice)"}.`;
   });
 }
 
@@ -774,7 +818,9 @@ export function initGallery(items, model, themes = []) {
     const nextLabel = roomIndex === rooms.length - 2 ? "Enter the ring →" : "Next room →";
     if (next.textContent !== nextLabel) next.textContent = nextLabel;
     if (line) line.style.setProperty("--p", String(p));
-    opening.style.opacity = String(Math.max(0, 1 - (distance + 6) / 7));
+    const openingOpacity = Math.max(0, 1 - (distance + 6) / 7);
+    opening.style.opacity = String(openingOpacity);
+    opening.style.visibility = openingOpacity < 0.01 ? "hidden" : "visible"; // never ghost into later rooms
     opening.style.pointerEvents = distance < -4 ? "auto" : "none";
   }
 
@@ -792,7 +838,7 @@ export function initGallery(items, model, themes = []) {
     titleCard.querySelector("small").textContent = room.ring ? "final room" : `room ${String(index + 1).padStart(2, "0")}`;
     titleCard.querySelector("strong").textContent = room.title;
     titleCard.querySelector("span").textContent = (room.signature || []).join(" · ");
-    whyPanel.querySelector("p").textContent = room.note;
+    whyPanel.querySelector("p").textContent = [room.note, room.floorNote].filter(Boolean).join(" ");
     const readout = whyPanel.querySelector(".gallery-dials");
     if (readout) {
       readout.replaceChildren();
@@ -957,9 +1003,29 @@ export function initGallery(items, model, themes = []) {
     if (l > cap) fog.multiplyScalar(cap / l);
     const topNight = calm(dark.clone(), 0.55).multiplyScalar(0.5);
     const topDay = calm(lightC.clone().lerp(new THREE.Color(0x9db6d0), 0.45), 0.25).multiplyScalar(0.75);
+    const top = topNight.lerp(topDay, Math.pow(day, 1.6));
+    // Each ground brings its own color mood, so rooms feel distinct instead of all drifting to grey.
+    const mood = {
+      sand: { fog: 0xd39a60, top: 0xb4693f, light: 0xffd6a0, glow: 0xffad5c },
+      meadow: { fog: 0xb9cc98, top: 0x9cc4dc, light: 0xfff0c4, glow: 0xf4d470 },
+      marble: { fog: 0xc9b597, top: 0x8f7a63, light: 0xfff1da, glow: 0xf1c586 },
+      snow: { fog: 0x8fa6c4, top: 0x3f5f8f, light: 0xe6efff, glow: 0x9ad8ff },
+      neon: { fog: 0x2a1240, top: 0x0c0622, light: 0xc9a2ff, glow: 0xff4fd8 },
+      clouds: { fog: 0xe6bcd3, top: 0x7d68c4, light: 0xfff0f6, glow: 0xffb3d6 },
+      forest: { fog: 0x1f3a2a, top: 0x13281d, light: 0xd8f2bd, glow: 0xb9f27a },
+    }[room.floor];
+    if (mood) {
+      const brightness = 0.35 + 0.65 * day;
+      fog.lerp(new THREE.Color(mood.fog).multiplyScalar(brightness), 0.6);
+      top.lerp(new THREE.Color(mood.top).multiplyScalar(brightness), 0.55);
+      lightC.lerp(new THREE.Color(mood.light), 0.45);
+      vivid.lerp(new THREE.Color(mood.glow), 0.5);
+      const ml = lum(fog), mcap = cap * 1.25 + 0.015; // bright grounds stay luminous without washing out
+      if (ml > mcap) fog.multiplyScalar(mcap / ml);
+    }
     return {
       fog,
-      top: topNight.lerp(topDay, Math.pow(day, 1.6)),
+      top,
       deep: dark.clone(),
       mid: sorted[1].clone().lerp(mean, 0.3),
       accent: sorted[2].clone(),
@@ -1155,7 +1221,7 @@ export function initGallery(items, model, themes = []) {
     // Nothing here is a fixed scene. Every quantity (how far the shore is, how tall the hills, whether
     // trees droop or point, how ordered the buildings are, what falls from the sky) is a function of
     // the dials, so each room is its own point in a continuous design space.
-    function generate({ group, r, z0, len, D, c, ring }) {
+    function generate({ group, r, z0, len, D, c, ring, floor = "water", first = false }) {
       const zc = z0 - len / 2;
       const half = len / 2 + 12;
       const gap = ring ? 22 : 7 + D.wet * 15 + (1 - D.crowd) * 5;
@@ -1284,7 +1350,7 @@ export function initGallery(items, model, themes = []) {
 
       // ----- the water's edge: lily pads where it is wet, green and calm; reeds at the shore -----
       const marsh = D.wet * D.growth * (1 - D.storm * 0.7);
-      if (marsh > 0.12) {
+      if (marsh > 0.12 && floor === "water") {
         const pad = new THREE.CircleGeometry(0.5, 22, 0.35, Math.PI * 2 - 0.35).rotateX(-Math.PI / 2);
         const padColor = c.mid.clone().lerp(new THREE.Color(0x4f7a4a), 0.55);
         const pads = [];
@@ -1300,7 +1366,7 @@ export function initGallery(items, model, themes = []) {
         });
       }
       const reedAmount = D.wet * clamp01(D.growth * 1.4 - 0.2);
-      if (reedAmount > 0.15 && !ring) {
+      if (reedAmount > 0.15 && !ring && floor === "water") {
         scatter(group, new THREE.CylinderGeometry(0.02, 0.035, 1, 4).translate(0, 0.5, 0), sway(new THREE.MeshLambertMaterial({ color: grassCol.clone().multiplyScalar(0.7) }), 0.12), 700 * reedAmount, () => ({
           x: side(r, gap - 2.5, gap + 2), y: -0.2, z: zc + (r() - 0.5) * len, rz: (r() - 0.5) * 0.25, sy: 1 + r() * 1.6, s: 1,
         }));
@@ -1555,7 +1621,7 @@ export function initGallery(items, model, themes = []) {
       // ----- weather: rain (wet), snow (cold), blown dust (dry, turbulent), embers (hot), fireflies, rising motes -----
       const rain = clamp01((D.wet - 0.55) * 2.6) * (0.35 + 0.65 * D.storm);
       if (rain > 0.05) weather({ group, r, zc, len, count: 2600 * rain, color: c.light, velocity: [-2 * D.storm, -18, 0], streak: 0.55, opacity: 0.35 });
-      const snowfall = clamp01((0.42 - D.warmth) * 3) * (0.4 + 0.6 * D.wet);
+      const snowfall = floor === "snow" ? Math.max(0.55, clamp01((0.42 - D.warmth) * 3)) : clamp01((0.42 - D.warmth) * 3) * (0.4 + 0.6 * D.wet);
       if (snowfall > 0.05) weather({ group, r, zc, len, count: 2000 * snowfall, color: new THREE.Color(0xf4f7fb), velocity: [0.4 * D.storm, -1.2, 0], wobble: 0.6, size: 0.13 });
       const dust = clamp01((0.45 - D.wet) * 2.5) * clamp01(D.storm * 1.6 - 0.2);
       if (dust > 0.05) weather({ group, r, zc, len, count: 1200 * dust, color: sand.clone().lerp(c.light, 0.3), velocity: [3 + 6 * D.storm, 0.1, 0], wobble: 0.4, size: 0.09, opacity: 0.5 });
@@ -1564,7 +1630,171 @@ export function initGallery(items, model, themes = []) {
       const fireflies = D.night * D.growth * D.warmth;
       if (fireflies > 0.12) weather({ group, r, zc, len, count: 600 * fireflies, color: new THREE.Color(0xfff0a0).lerp(c.glow, 0.3), velocity: [0, 0.05, 0], wobble: 1, size: 0.16, box: [24, 5] });
       if (lift > 0.1) weather({ group, r, zc, len, count: 400 * lift, color: c.glow.clone().lerp(c.light, 0.5), velocity: [0, 0.6, 0], wobble: 0.3, size: 0.1, box: [30, 18] });
+      buildFloor({ group, sky, r, z0, zc, len, c, D, floor, ring, noise, first });
       return { rain };
+    }
+
+    // ----- the ground: eight kinds, each with its own texture, light and set pieces -----
+    function groundPlane(width, length, zc, segX, segZ, shape, material) {
+      const geo = track(new THREE.PlaneGeometry(width, length, segX, segZ).rotateX(-Math.PI / 2));
+      const pos = geo.attributes.position;
+      const colors = new Float32Array(pos.count * 3);
+      const col = new THREE.Color();
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i), z = pos.getZ(i) + zc;
+        pos.setY(i, shape(x, z, col));
+        col.toArray(colors, i * 3);
+      }
+      geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+      geo.computeVertexNormals();
+      const mesh = new THREE.Mesh(geo, track(material));
+      mesh.position.z = zc;
+      return mesh;
+    }
+
+    const shaftTexture = canvasTexture(THREE, 64, 256, (ctx, w, h) => {
+      const v = ctx.createLinearGradient(0, 0, 0, h);
+      v.addColorStop(0, "rgba(255,255,255,0)"); v.addColorStop(0.25, "rgba(255,255,255,.9)");
+      v.addColorStop(0.75, "rgba(255,255,255,.5)"); v.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = v; ctx.fillRect(0, 0, w, h);
+      ctx.globalCompositeOperation = "destination-in";
+      const hz = ctx.createLinearGradient(0, 0, w, 0);
+      hz.addColorStop(0, "rgba(0,0,0,0)"); hz.addColorStop(0.5, "rgba(0,0,0,1)"); hz.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = hz; ctx.fillRect(0, 0, w, h);
+    });
+    // Slanting light through leaves or a high window: soft additive beams that turn to face you.
+    function lightShafts(group, r, zc, len, color, count, opacity) {
+      const mat = track(new THREE.MeshBasicMaterial({ map: shaftTexture, color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+      const geo = track(new THREE.PlaneGeometry(2.6, 26));
+      for (let i = 0; i < count; i++) {
+        const beam = new THREE.Mesh(geo, mat);
+        const base = { x: side(r, 1.5, 12), z: zc + (r() - 0.5) * len, tilt: 0.25 + r() * 0.2 };
+        beam.position.set(base.x, 10, base.z);
+        group.add(beam);
+        animators.push(() => { beam.rotation.set(0, Math.atan2(camera.position.x - base.x, camera.position.z - base.z), base.tilt); });
+      }
+    }
+
+    function buildFloor({ group, sky, r, z0, zc: roomCenter, len, c, D, floor, ring, noise, first }) {
+      if (floor === "water") return;
+      // Grounds meet at the room's edges (a sliver of overlap), so nothing spills into the next room.
+      // The first room's ground also reaches back under the starting point.
+      const L = len + 1.5 + (first ? 14 : 0), W = 150;
+      const zc = roomCenter + (first ? 7 : 0);
+      const y0 = 0.004 + r() * 0.006;
+      if (floor === "sand") {
+        const sand = new THREE.Color(0xd9b07a).lerp(c.accent, 0.15), shade = sand.clone().multiplyScalar(0.78);
+        group.add(groundPlane(W, L, zc, 150, Math.round(L), (x, z, col) => {
+          const ripple = Math.sin(x * 1.6 + Math.sin(z * 0.22) * 2.2) * 0.5 + 0.5;
+          const dune = noise(x * 0.06, z * 0.06);
+          col.copy(sand).lerp(shade, ripple * 0.35 + (1 - dune) * 0.2);
+          return y0 + ripple * 0.05 + dune * 0.25 * clamp01((Math.abs(x) - 2) / 10);
+        }, new THREE.MeshLambertMaterial({ vertexColors: true })));
+      } else if (floor === "meadow" || floor === "forest") {
+        const meadow = floor === "meadow";
+        const base = meadow ? new THREE.Color(0x6f8f45).lerp(c.mid, 0.15) : new THREE.Color(0x2c4a2a).lerp(c.deep, 0.2);
+        const dark = base.clone().multiplyScalar(0.7);
+        group.add(groundPlane(W, L, zc, 100, Math.round(L / 1.5), (x, z, col) => {
+          col.copy(base).lerp(dark, noise(x * 0.3, z * 0.3) * 0.6);
+          return y0 + noise(x * 0.1, z * 0.1) * 0.12;
+        }, new THREE.MeshLambertMaterial({ vertexColors: true })));
+        const blade = new THREE.ConeGeometry(0.045, 1, 3, 3).translate(0, 0.5, 0);
+        const bladeCol = meadow ? new THREE.Color(0x9bbd5a).lerp(c.light, 0.15) : new THREE.Color(0x4f7a3a);
+        const count = Math.min(finePointer ? 7000 : 3500, Math.round(L * (meadow ? 120 : 50)));
+        scatter(group, blade, sway(new THREE.MeshLambertMaterial({ color: 0xffffff }), meadow ? 0.18 : 0.08), count, (i, col) => {
+          let x = (r() - 0.5) * 40;
+          if (Math.abs(x) < 1 && r() < 0.85) x += x < 0 ? -1 : 1; // a faint trail where people have walked
+          return { x, y: 0, z: zc + (r() - 0.5) * L, ry: r() * 6, rz: (r() - 0.5) * 0.3, s: meadow ? 0.6 + r() * 0.9 : 0.4 + r() * 0.5,
+            color: col.copy(bladeCol).offsetHSL((r() - 0.5) * 0.06, 0, (r() - 0.5) * 0.16).clone() };
+        });
+        if (meadow) {
+          scatter(group, new THREE.IcosahedronGeometry(0.035, 1), new THREE.MeshBasicMaterial({ color: 0xffffff }), 900, () => {
+            const pick = r();
+            return { x: side(r, 1.6, 18), y: 0.55 + r() * 0.5, z: zc + (r() - 0.5) * L, s: 0.7 + r() * 0.8, color: new THREE.Color(pick < 0.4 ? 0xfff3c9 : pick < 0.7 ? 0xf4b3c2 : 0xb9a3f0) };
+          });
+          lightShafts(group, r, zc, len, c.light.clone().lerp(new THREE.Color(0xfff0c0), 0.5), 7, 0.16);
+        } else {
+          // fallen leaves and glowing mushrooms
+          scatter(group, new THREE.PlaneGeometry(0.16, 0.1).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide }), 1400, () => ({
+            x: (r() - 0.5) * 30, y: 0.03, z: zc + (r() - 0.5) * L, ry: r() * 6.28, color: new THREE.Color(r() < 0.5 ? 0xb5652d : 0xd9a441).lerp(c.accent, 0.2),
+          }));
+          const cap = new THREE.SphereGeometry(0.12, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+          scatter(group, cap, new THREE.MeshBasicMaterial({ color: 0xffffff }), 90, () => ({
+            x: side(r, 2.3, 10), y: 0.04, z: zc + (r() - 0.5) * L, s: 0.35 + r() * 0.6, color: c.glow.clone().lerp(new THREE.Color(0x9cff9c), 0.4),
+          }));
+          lightShafts(group, r, zc, len, new THREE.Color(0xd8ffb0).lerp(c.light, 0.3), 9, 0.13);
+        }
+      } else if (floor === "marble") {
+        const tiles = track(canvasTexture(THREE, 512, 512, (ctx, w, h) => {
+          ctx.fillStyle = "#efe7da"; ctx.fillRect(0, 0, w, h);
+          for (let i = 0; i < 26; i++) { // veins
+            ctx.strokeStyle = `rgba(120,108,96,${0.06 + Math.random() * 0.1})`; ctx.lineWidth = 0.6 + Math.random() * 1.6;
+            ctx.beginPath(); let x = Math.random() * w, y = Math.random() * h; ctx.moveTo(x, y);
+            for (let k = 0; k < 6; k++) { x += (Math.random() - 0.3) * 90; y += (Math.random() - 0.5) * 60; ctx.lineTo(x, y); }
+            ctx.stroke();
+          }
+          ctx.strokeStyle = "rgba(90,80,70,.35)"; ctx.lineWidth = 2;
+          ctx.strokeRect(1, 1, w / 2 - 1, h / 2 - 1); ctx.strokeRect(w / 2, 1, w / 2 - 1, h / 2 - 1);
+          ctx.strokeRect(1, h / 2, w / 2 - 1, h / 2 - 1); ctx.strokeRect(w / 2, h / 2, w / 2 - 1, h / 2 - 1);
+        }));
+        tiles.wrapS = tiles.wrapT = THREE.RepeatWrapping;
+        tiles.repeat.set(W / 6, L / 6);
+        const court = new THREE.Mesh(track(new THREE.PlaneGeometry(W, L).rotateX(-Math.PI / 2)), track(new THREE.MeshPhongMaterial({ map: tiles, color: c.light.clone().lerp(new THREE.Color(0xffffff), 0.5), specular: 0x555555, shininess: 70 })));
+        court.position.set(0, y0, zc);
+        group.add(court);
+        lightShafts(group, r, zc, len, c.light.clone().lerp(new THREE.Color(0xfff1d6), 0.6), 6, 0.14);
+      } else if (floor === "snow") {
+        const snow = new THREE.Color(0xdfe7f1), blue = new THREE.Color(0x9fb3cf);
+        group.add(groundPlane(W, L, zc, 120, Math.round(L), (x, z, col) => {
+          const drift = noise(x * 0.08, z * 0.08);
+          col.copy(snow).lerp(blue, (1 - drift) * 0.5);
+          return y0 + drift * 0.35 * clamp01((Math.abs(x) - 1.5) / 8);
+        }, new THREE.MeshLambertMaterial({ vertexColors: true })));
+        const n = 700, pos = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) pos.set([(r() - 0.5) * 30, 0.06, zc + (r() - 0.5) * L], i * 3);
+        const geo = track(new THREE.BufferGeometry()); geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+        const mat = track(new THREE.PointsMaterial({ size: 0.07, map: glowTexture, color: 0xffffff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }));
+        group.add(new THREE.Points(geo, mat));
+        animators.push((t) => { mat.opacity = 0.55 + Math.sin(t * 3.1) * 0.35; }); // glints in the snow
+      } else if (floor === "neon") {
+        const grid = track(canvasTexture(THREE, 256, 256, (ctx, w, h) => {
+          ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h);
+          ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 3; ctx.strokeRect(0, 0, w, h);
+        }));
+        grid.wrapS = grid.wrapT = THREE.RepeatWrapping;
+        grid.repeat.set(W / 3, L / 3);
+        const glow = c.glow.clone().lerp(new THREE.Color(0xff4fd8), 0.5);
+        const plane = new THREE.Mesh(track(new THREE.PlaneGeometry(W, L).rotateX(-Math.PI / 2)), track(new THREE.MeshLambertMaterial({ color: 0x07040f, emissive: glow, emissiveMap: grid, emissiveIntensity: 1.4 })));
+        plane.position.set(0, y0, zc);
+        group.add(plane);
+        // a striped sun sinking at the end of the grid
+        const sunTex = track(canvasTexture(THREE, 256, 256, (ctx, w, h) => {
+          const g = ctx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, "#ffe27a"); g.addColorStop(0.55, "#ff6fa8"); g.addColorStop(1, "#a33cff");
+          ctx.fillStyle = g; ctx.beginPath(); ctx.arc(w / 2, h / 2, w / 2, 0, Math.PI * 2); ctx.fill();
+          ctx.globalCompositeOperation = "destination-out";
+          for (let i = 0; i < 7; i++) { const y = h * 0.55 + i * i * 2.6 + i * 8; ctx.fillRect(0, y, w, 3 + i * 1.6); }
+        }));
+        const sunDisk = new THREE.Mesh(track(new THREE.PlaneGeometry(44, 44)), track(new THREE.MeshBasicMaterial({ map: sunTex, transparent: true, fog: false, depthWrite: false })));
+        sunDisk.position.set(0, 12, z0 - len - 110);
+        sky.add(sunDisk);
+        const haze = new THREE.Sprite(track(new THREE.SpriteMaterial({ map: glowTexture, color: 0xff4fd8, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })));
+        haze.position.copy(sunDisk.position); haze.scale.setScalar(120);
+        sky.add(haze);
+      } else if (floor === "clouds") {
+        group.add(groundPlane(W, L, zc, 90, Math.round(L / 1.5), (x, z, col) => {
+          const puff = noise(x * 0.12, z * 0.12);
+          col.copy(c.light).lerp(new THREE.Color(0xffffff), 0.6).lerp(c.glow, (1 - puff) * 0.25);
+          return -0.35 + puff * 0.5;
+        }, new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, opacity: 0.92 })));
+        const mat = track(new THREE.SpriteMaterial({ map: glowTexture, color: c.light.clone().lerp(new THREE.Color(0xffffff), 0.5), transparent: true, opacity: 0.55, depthWrite: false }));
+        for (let i = 0; i < 46; i++) {
+          const s = new THREE.Sprite(mat);
+          const base = { x: side(r, 1.6, 30), y: -0.2 + r() * 1.4, z: zc + (r() - 0.5) * L, s: 4 + r() * 12, p: r() * 6 };
+          s.scale.set(base.s * 1.6, base.s * 0.6, 1);
+          group.add(s);
+          animators.push((t) => { s.position.set(base.x + Math.sin(t * 0.05 + base.p) * 1.5, base.y, base.z); });
+        }
+      }
     }
 
     // Falling, drifting or rising particles inside a box around the path, wrapped so they never run out.
@@ -1639,6 +1869,30 @@ export function initGallery(items, model, themes = []) {
       const halo = new THREE.Mesh(track(new THREE.PlaneGeometry(width * 2.6, h * 2.4)), track(new THREE.MeshBasicMaterial({ map: glowTexture, color: c.glow, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending, depthWrite: false })));
       halo.position.z = -0.12;
       holder.add(halo, frame, art);
+      // How the work is shown depends on the ground: a standing stone wall in the marble court, a glowing
+      // frame on the neon grid, floating higher over the clouds, and a wooden post on land.
+      const floor = entry.floor || "water";
+      const ground = entry.position.y;
+      if (floor === "marble") {
+        const wallH = ground + h / 2 + 0.7;
+        const wall = new THREE.Mesh(track(new THREE.BoxGeometry(width + 0.9, wallH, 0.22)), track(new THREE.MeshPhongMaterial({ color: c.light.clone().lerp(new THREE.Color(0xf3ece0), 0.6), shininess: 30 })));
+        wall.position.set(0, -ground + wallH / 2, -0.2);
+        holder.add(wall);
+        entry.bob = 0;
+      } else if (floor === "neon") {
+        frame.material.emissive = c.glow.clone().lerp(new THREE.Color(0x40e0ff), 0.4);
+        frame.material.emissiveIntensity = 0.9;
+        halo.material.opacity = 0.5;
+      } else if (floor === "clouds") {
+        entry.position.y += 0.5;
+        entry.bob = 0.22;
+      } else if (floor !== "water") {
+        const postH = ground - h / 2;
+        const post = new THREE.Mesh(track(new THREE.CylinderGeometry(0.05, 0.07, postH, 8)), track(new THREE.MeshLambertMaterial({ color: floor === "snow" ? 0x5a4636 : 0x4a3626 })));
+        post.position.set(0, -h / 2 - postH / 2, -0.06);
+        holder.add(post);
+        entry.bob = 0;
+      }
       holder.position.copy(entry.position);
       holder.rotation.y = entry.rotationY;
       group.add(holder);
@@ -1676,13 +1930,15 @@ export function initGallery(items, model, themes = []) {
         const len = room.ring ? 34 : Math.max(32, room.works.length * SPACING + 16);
         const z0 = -z;
         const D = room.design;
-        const { rain } = generate({ group, r, z0, len, D, c, ring: room.ring });
+        const floor = room.floor || "water";
+        const { rain } = generate({ group, r, z0, len, D, c, ring: room.ring, floor, first: index === 0 });
         roomEnvs.push({
-          start: z, len, c,
-          density: (room.ring ? 0.016 : 0.012) + D.wet * 0.012 + D.storm * 0.006 + (1 - D.scale) * 0.005
-            + clamp01((0.85 - room.coherence) / 0.35) * 0.012,
+          start: z, len, c, floor,
+          density: ((room.ring ? 0.016 : 0.012) + D.wet * 0.012 + D.storm * 0.006 + (1 - D.scale) * 0.005
+            + clamp01((0.85 - room.coherence) / 0.35) * 0.012)
+            * ({ water: 1, sand: 0.7, meadow: 0.85, marble: 0.6, snow: 0.55, neon: 0.65, clouds: 0.8, forest: 1.1 }[floor] ?? 1),
           ripple: 0.22 + D.storm * 0.9 + D.wet * 0.25 + rain * 0.4,
-          exposure: 1.1 - D.night * 0.22,
+          exposure: (floor === "neon" ? 0.95 : floor === "snow" ? 1.0 : 1.1) - D.night * 0.22,
           hemi: 0.85 + (1 - D.night) * 0.85,
           sun: 0.45 + (1 - D.night) * 1.25,
         });
@@ -1720,6 +1976,7 @@ export function initGallery(items, model, themes = []) {
           });
         }
         for (const entry of entries.filter((e) => e.room === index)) {
+          entry.floor = floor;
           hangWork(group, entry, await loadTexture(entry.item), c);
         }
         z += len;
@@ -1764,6 +2021,8 @@ export function initGallery(items, model, themes = []) {
       hemi.intensity = a.hemi + (b.hemi - a.hemi) * k;
       sun.intensity = a.sun + (b.sun - a.sun) * k;
       if (water) {
+        // the water only exists near rooms that stand on it (and costs nothing elsewhere)
+        water.visible = roomEnvs.some((e) => e.floor === "water" && distance > e.start - 45 && distance < e.start + e.len + 25);
         const u = water.material.uniforms;
         u.uFogColor.value.copy(scene.fog.color);
         u.uFogDensity.value = scene.fog.density;
@@ -1844,7 +2103,7 @@ export function initGallery(items, model, themes = []) {
           const facing = Math.sin(holder.rotation.y) * (camera.position.x - holder.position.x) + Math.cos(holder.rotation.y) * (camera.position.z - holder.position.z);
           holder.visible = facing > 0;
         }
-        const lift = reducedMotion.matches ? 0 : Math.sin(t * 0.8 + entry.phase) * 0.05;
+        const lift = reducedMotion.matches ? 0 : Math.sin(t * 0.8 + entry.phase) * (entry.bob ?? 0.05);
         holder.position.y = entry.baseY + lift;
         const target = entry === hovered ? 1.06 : 1;
         holder.scale.setScalar(holder.scale.x + (target - holder.scale.x) * 0.12);
