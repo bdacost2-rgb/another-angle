@@ -307,6 +307,70 @@ function wrapLines(ctx, text, maxWidth) {
   return lines;
 }
 
+// Your collection is a living planet you found: oceans, continents, clouds, ice, city lights on its night
+// side and a glowing atmosphere. You circle it like a space station, your works in orbit with you.
+const PLANET_VERTEX = /* glsl */`
+varying vec3 vObj;
+varying vec3 vWN;
+varying vec3 vWPos;
+void main() {
+  vObj = position;
+  vWN = normalize(mat3(modelMatrix) * normal);
+  vec4 w = modelMatrix * vec4(position, 1.0);
+  vWPos = w.xyz;
+  gl_Position = projectionMatrix * viewMatrix * w;
+}`;
+const PLANET_FRAGMENT = /* glsl */`
+uniform vec3 uSunDir;
+uniform vec3 uTint;
+uniform float uTime;
+varying vec3 vObj;
+varying vec3 vWN;
+varying vec3 vWPos;
+float hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float noise(vec3 x) {
+  vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(hash(i), hash(i + vec3(1,0,0)), f.x), mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
+             mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x), mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+float fbm(vec3 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++) { s += a * noise(p); p *= 2.03; a *= 0.5; } return s; }
+void main() {
+  vec3 n = normalize(vObj);
+  float h = fbm(n * 7.0);
+  float land = smoothstep(0.5, 0.53, h);
+  vec3 ocean = mix(vec3(0.015, 0.07, 0.17), vec3(0.04, 0.22, 0.38), smoothstep(0.3, 0.5, h));
+  vec3 ground = mix(vec3(0.13, 0.28, 0.1), vec3(0.42, 0.35, 0.2), smoothstep(0.56, 0.72, h));
+  vec3 col = mix(ocean, ground, land);
+  col = mix(col, vec3(0.9, 0.93, 0.97), smoothstep(0.8, 0.92, abs(n.y) + (h - 0.5) * 0.3));
+  float cloud = smoothstep(0.6, 0.82, fbm(n * 11.0 + vec3(uTime * 0.01, 0.0, uTime * 0.005)));
+  col = mix(col, vec3(0.95), cloud * 0.7);
+  vec3 N = normalize(vWN);
+  float light = dot(N, uSunDir);
+  float day = smoothstep(-0.12, 0.28, light);
+  vec3 lit = col * (0.03 + 0.85 * max(light, 0.0));
+  float city = land * (1.0 - cloud) * step(0.84, noise(n * 160.0)) * (1.0 - day);
+  lit += vec3(1.0, 0.72, 0.38) * city * 0.9;
+  vec3 V = normalize(cameraPosition - vWPos);
+  float rim = pow(1.0 - max(dot(N, V), 0.0), 3.0);
+  lit += uTint * rim * (0.1 + 0.55 * day);
+  gl_FragColor = vec4(lit, 1.0);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+}`;
+const ATMOSPHERE_FRAGMENT = /* glsl */`
+uniform vec3 uSunDir;
+uniform vec3 uTint;
+varying vec3 vObj;
+varying vec3 vWN;
+varying vec3 vWPos;
+void main() {
+  vec3 V = normalize(cameraPosition - vWPos);
+  vec3 N = normalize(vWN);
+  float f = pow(1.0 - abs(dot(N, V)), 2.2);
+  float day = smoothstep(-0.35, 0.4, dot(N, uSunDir));
+  gl_FragColor = vec4(uTint * f * (0.25 + day) * 0.7, 1.0);
+}`;
+
 // The last step of the cinematic finish: a soft vignette and fine film grain, applied after tone mapping.
 const FINISH_SHADER = {
   uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uGrain: { value: 0.04 }, uVignette: { value: 0.3 } },
@@ -374,8 +438,16 @@ export function initGallery(items, model, themes = []) {
   setTip();
 
   function updateIntro() {
+    const heading = opening.querySelector("h2");
+    if (heading) heading.textContent = galleryMode === "collection" ? "A world you found." : "Beyond your taste.";
+    const onward = $("#gallery-explore");
+    if (onward) onward.textContent = galleryMode === "collection" ? "Explore beyond it →" : "Explore the map →";
+    if (galleryMode === "collection") {
+      intro.textContent = model.liked.length ? `Your collection: ${model.liked.length} works you love, in orbit around it, grouped by how they feel.` : "Heart works in Inspiration to fill your collection.";
+      return;
+    }
     if (model.count >= 8 && model.liked.length >= 4) {
-      intro.textContent = `What you love, then what lies just past it. Built from your ${model.count} choices.`;
+      intro.textContent = "Works you've never seen, reaching outward from what you love.";
     } else if (model.count >= 8) {
       intro.textContent = `Built from your ${model.count} choices. Save a few more (♥) to fill it.`;
     } else {
@@ -400,13 +472,36 @@ export function initGallery(items, model, themes = []) {
     // works you've never seen, each a step further from that heart (picked at widening distances in CLIP
     // space along the galaxy's own direction). The spiral walk is the expansion.
     const pool = () => items.filter((item) => fits(item) && !used.has(item.id) && !usedTitles.has(workKey(item)));
-    const STEPS = [[0, "new · just past your taste"], [6, "new · further out"], [24, "new · further out"], [70, "new · far out"]];
+    const STEPS = [[0, "just past your taste"], [4, "just past your taste"], [12, "further out"], [30, "further out"], [70, "far out"]];
     const groups = liked.length >= 2 ? clusterByAesthetic(liked) : liked.length ? [liked] : [];
+    // Your collection: every work you love, grouped by the AI, floating on the ocean. Nothing new here.
+    if (galleryMode === "collection") {
+      for (const group of groups) {
+        const r = recipe(group);
+        result.push({
+          ...r,
+          title: r.theme?.n || "The works you brought",
+          note: `${group.length === 1 ? "One work" : `${group.length} works`} you love that look and read alike, grouped by the AI (CLIP). Its name comes from what the AI measured in them.${r.neighbors[0] ? ` Closest curated theme: ${r.neighbors[0].name}.` : ""}`,
+          works: group,
+          reach: new Map(group.map((item) => [item.id, "yours"])),
+          fromTaste: true,
+        });
+      }
+      if (!result.length) {
+        const first = uniqueWorks(model.pick(24).filter(fits), 4);
+        if (first.length) result.push({ ...recipe(first), title: "A first look", note: "Heart works in Inspiration to fill your collection.", works: first });
+      }
+      const finished = result.filter((room) => room.works.length);
+      designRooms(finished, dialSet || []);
+      publishRooms(finished);
+      return finished;
+    }
+    // Exploration: only works you've never seen, each galaxy reaching outward from one of your taste groups.
     for (const group of groups) {
       const r = recipe(group);
       const centroid = centroidOf(group);
-      const anchors = [...group].sort((x, y) => dot(y.vec, centroid) - dot(x.vec, centroid)).slice(0, 3);
-      const reach = new Map(anchors.map((item) => [item.id, "yours"]));
+      const anchors = [];
+      const reach = new Map();
       const ranked = pool().map((item) => [dot(item.vec, centroid), item]).sort((x, y) => y[0] - x[0]).map(([, item]) => item);
       const outward = [];
       for (const [rank, label] of STEPS) {
@@ -421,7 +516,7 @@ export function initGallery(items, model, themes = []) {
       result.push({
         ...r,
         title: r.theme?.n || "The works you brought", // replaced by a name read from the works (designRooms)
-        note: `It begins with ${anchors.length === 1 ? "one work" : `${anchors.length} works`} you love that look and read alike (grouped by the AI, CLIP), then carries you outward through ${outward.length} you've never seen, each a step further from your taste. Its name comes from what the AI measured in them.${r.neighbors[0] ? ` Closest curated theme: ${r.neighbors[0].name}.` : ""}`,
+        note: `${outward.length} works you've never seen, reaching outward from a group of ${group.length} you love, each a step further from your taste (by CLIP). Its name comes from what the AI measured in them.`,
         works,
         reach,
         fromTaste: true,
@@ -440,7 +535,7 @@ export function initGallery(items, model, themes = []) {
     }), 4, usedTitles);
     edge.forEach((item) => { used.add(item.id); usedTitles.add(workKey(item)); });
     if (edge.length) {
-      result.push({ ...recipe(edge), title: "At the edge of your taste", note: "Works the AI can't place: right on the boundary of what you love. Your ♥ or × here teaches it the most.", works: edge, reach: new Map(edge.map((item) => [item.id, "new · the edge"])) });
+      result.push({ ...recipe(edge), fromTaste: false, title: "At the edge of your taste", note: "Works the AI can't place: right on the boundary of what you love. Your ♥ or × here teaches it the most.", works: edge, reach: new Map(edge.map((item) => [item.id, "the edge of your taste"])) });
     }
 
     const finished = result.filter((room) => room.works.length);
@@ -463,6 +558,16 @@ export function initGallery(items, model, themes = []) {
   }
   let pendingEntry = null;
   let building = false;
+  // Two galleries: your collection on the ocean, and exploration out in the universe.
+  let galleryMode = "collection";
+  window.GALLERY_MODE = galleryMode;
+  window.addEventListener("gallery:mode", (event) => {
+    const mode = event.detail?.mode;
+    if (!mode || mode === galleryMode) return;
+    galleryMode = mode;
+    window.GALLERY_MODE = mode;
+    if (engine) build();
+  });
   // Switching between photos, writing or both rebuilds the rooms (and the map's constellations).
   window.addEventListener("focus:change", () => { if (engine) build(); });
   window.addEventListener("gallery:enter-room", (event) => {
@@ -664,7 +769,10 @@ export function initGallery(items, model, themes = []) {
     } catch { /* without storage the coach still opens, just without the room */ }
     location.href = "index.html#write";
   });
-  $("#gallery-explore")?.addEventListener("click", () => document.querySelector('.rail [data-pane="map"]')?.click());
+  $("#gallery-explore")?.addEventListener("click", () => {
+    if (galleryMode === "collection") document.querySelector('.rail [data-mode="exploration"]')?.click();
+    else document.querySelector('.rail [data-pane="map"]')?.click();
+  });
 
   function updateControls(distance, p) {
     const room = rooms[roomIndex];
@@ -1017,6 +1125,23 @@ export function initGallery(items, model, themes = []) {
       scene.add(sky);
     }
 
+    // ----- the planet you found (your collection): built once, shown only in that gallery -----
+    const PLANET_R = 90, PLANET_DROP = 112;
+    const sunDir = new THREE.Vector3(0.55, 0.62, 0.25).normalize(); // lights the side of the planet you see
+    const planetUniforms = { uSunDir: { value: sunDir }, uTint: { value: new THREE.Color(0x5a9cff) }, uTime: { value: 0 } };
+    const planet = new THREE.Group();
+    const surface = new THREE.Mesh(new THREE.SphereGeometry(PLANET_R, 160, 80), new THREE.ShaderMaterial({ uniforms: planetUniforms, vertexShader: PLANET_VERTEX, fragmentShader: PLANET_FRAGMENT }));
+    const atmosphere = new THREE.Mesh(new THREE.SphereGeometry(PLANET_R * 1.035, 96, 48), new THREE.ShaderMaterial({
+      uniforms: planetUniforms, vertexShader: PLANET_VERTEX, fragmentShader: ATMOSPHERE_FRAGMENT,
+      side: THREE.BackSide, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    planet.add(surface, atmosphere);
+    const sunGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture, color: 0xfff1d6, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    sunGlow.scale.setScalar(60);
+    planet.add(sunGlow);
+    planet.visible = false;
+    scene.add(planet);
+
     let world = null;
     let roomEnvs = [];
     let picks = [];
@@ -1127,7 +1252,7 @@ export function initGallery(items, model, themes = []) {
         const approach = index === 0 ? 10 : 16; // open space before you reach the galaxy's first work
         const zFirst = -(z + approach + VIEW);
         const length = approach + VIEW + (n - 1) * GAP + 8;
-        galaxy(group, -(z + length / 2 + 2), Math.max(26, length * 0.6), c, hashString(room.title) + index * 977);
+        if (galleryMode !== "collection") galaxy(group, -(z + length / 2 + 2), Math.max(26, length * 0.6), c, hashString(room.title) + index * 977);
         // the galaxy comes into view: a stop as you arrive, then each work in turn
         path.push({ room: index, dwell: 2.6, z: -(z + approach * 0.35) });
         const roomStart = path.length - 1;
@@ -1154,10 +1279,14 @@ export function initGallery(items, model, themes = []) {
           group.add(new THREE.Points(geo, track(new THREE.PointsMaterial({ size: 0.06, map: glowTexture, color: c.glow.clone().lerp(new THREE.Color(0xffffff), 0.5), transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false }))));
         }
         for (const entry of entries.filter((e) => e.room === index)) hangWork(group, entry, await loadTexture(entry.item), c);
-        roomEnvs.push({ c, roomStart, fog: new THREE.Color(0x03040a).lerp(c.deep, 0.1), bloom: 0.45 + (room.design?.dream ?? 0.5) * 0.2 });
+        roomEnvs.push({
+          c, roomStart, fog: new THREE.Color(0x03040a).lerp(c.deep, 0.1), bloom: 0.45 + (room.design?.dream ?? 0.5) * 0.2,
+          tint: new THREE.Color(0x5a9cff).lerp(c.glow, 0.22), // the planet's atmosphere takes a little of each group's color
+        });
         z += length;
       }
       buildSky(z);
+      planet.visible = galleryMode === "collection";
       // scroll distance: each stop takes a little scrolling, the glides between take more
       let unit = 0;
       path.forEach((stop, i) => {
@@ -1214,6 +1343,7 @@ export function initGallery(items, model, themes = []) {
       const a = roomEnvs[at.room], b = roomEnvs[at.next] || a, k = at.room === at.next ? 0 : at.k;
       scene.fog.color.copy(a.fog).lerp(b.fog, k);
       scene.background.copy(scene.fog.color);
+      if (planet.visible) planetUniforms.uTint.value.copy(a.tint).lerp(b.tint, k);
       if (bloom) bloom.strength = a.bloom + (b.bloom - a.bloom) * k;
       return k > 0.5 ? at.next : at.room;
     }
@@ -1236,6 +1366,13 @@ export function initGallery(items, model, themes = []) {
       look.pitch += (look.tPitch - look.pitch) * 0.05;
       camera.position.copy(at.pos);
       if (!reducedMotion.matches) { camera.position.y += Math.sin(t * 0.5) * 0.04; camera.position.x += Math.sin(t * 0.37) * 0.03; }
+      if (planet.visible) {
+        // the planet stays below you and turns as you travel, so you're circling it like a space station
+        planet.position.set(0, -PLANET_DROP, camera.position.z - 70);
+        surface.rotation.set(-camera.position.z / (PLANET_R * 1.6), t * 0.004, 0.18);
+        planetUniforms.uTime.value = t;
+        sunGlow.position.set(260, PLANET_DROP + 40, -260); // a distant sun off to the side
+      }
       const dir = tmpDir.copy(at.look).sub(camera.position);
       camera.rotation.set(Math.atan2(dir.y, Math.hypot(dir.x, dir.z)) + look.pitch * 0.6, Math.atan2(-dir.x, -dir.z) + look.yaw * 0.5, 0);
 

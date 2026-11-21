@@ -16,9 +16,9 @@ const PAGES = {
     kicker: "Uncharted",
     title: "Go beyond your taste.",
     steps: [
-      ["Scroll", "through galaxies made from what you love, and from works just past its edge."],
-      ["Click", "any work. ♥ the ones that surprise you, and your galaxies shift."],
-      ["Explore the map", "to find places your taste points to that nobody has made yet."],
+      ["Your world:", "circle the planet you found. Everything you love, in orbit around it."],
+      ["Beyond:", "drift through galaxies of works you've never seen, reaching outward from your taste. ♥ what surprises you."],
+      ["The map", "shows where your taste could go next. Click a star to head there."],
     ],
     next: "Inspiration is where you find what you love. This is where it leads.",
     button: "Drift in",

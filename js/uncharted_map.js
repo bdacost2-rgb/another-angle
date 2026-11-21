@@ -346,11 +346,12 @@ function go(name){ clearTimeout(paneTimer); pane=name;
   document.querySelector('.shell').classList.toggle('gallery-mode', name==='gallery');
   document.body.classList.toggle('gallery-full', name==='gallery'); if (name!=='gallery') document.body.classList.remove('is-immersed');
   PANES.forEach(n=>{ $('pane-'+n).hidden = n!==name; });
-  document.querySelectorAll('.rail [data-pane]').forEach(b=>{ if (b.dataset.pane===railOf(name)){ b.setAttribute('aria-current','true'); b.removeAttribute('data-new'); } else b.removeAttribute('aria-current'); });
+  document.querySelectorAll('.rail [data-pane]').forEach(b=>{ const on = b.dataset.pane===railOf(name) && (!b.dataset.mode || b.dataset.mode===(window.GALLERY_MODE||'collection'));
+    if (on){ b.setAttribute('aria-current','true'); b.removeAttribute('data-new'); } else b.removeAttribute('aria-current'); });
   if (name==='gallery' && document.activeElement?.closest('.rail')) $('gallery-stage').focus({preventScroll:true});
   if (name==='gallery') window.dispatchEvent(new CustomEvent('gallery:shown'));
   if (name==='map') requestAnimationFrame(resize); window.scrollTo(0,0); if (name==='checkpoint') queueSpiral(); }
-function flag(name){ if (railOf(pane)!==railOf(name)) document.querySelector(`.rail [data-pane="${railOf(name)}"]`).setAttribute('data-new','1'); }
+function flag(name){ if (railOf(pane)!==railOf(name)) document.querySelector(`.rail [data-pane="${railOf(name)}"]`)?.setAttribute('data-new','1'); }
 // Once you've picked works in Inspiration, the start step isn't needed: the rail begins at your gallery.
 if (DATA) document.querySelector('.rail [data-pane="seed"]').hidden=true;
 let spiralFrame=0;
@@ -402,7 +403,10 @@ document.addEventListener('pointermove', e=>{
   cpCursor.classList.add('is-visible');
 }, {passive:true});
 window.addEventListener('blur', ()=>cpCursor.classList.remove('is-visible'));
-document.querySelectorAll('.rail [data-pane]').forEach(b=>b.onclick=()=>go(b.dataset.pane));
+document.querySelectorAll('.rail [data-pane]').forEach(b=>b.onclick=()=>{
+  if (b.dataset.mode) window.dispatchEvent(new CustomEvent('gallery:mode', {detail:{mode:b.dataset.mode}})); // your world · beyond
+  go(b.dataset.pane);
+});
 document.addEventListener('click', e=>{ const a=e.target.closest('[data-go-pane]'); if (a){ e.preventDefault(); go(a.dataset.goPane); } });
 // ---------- your saved identity: answers, routes and blocks carry across sessions ----------
 const BLANK = {obs:[], trail:[], paths:[], blocks:[], sessions:0, seenWorkIds:[]};
