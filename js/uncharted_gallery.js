@@ -16,6 +16,7 @@ import { fitsFocus } from "./focus.js";
 const $ = (selector) => document.querySelector(selector);
 const UNIT_PX = 64; // scroll pixels per world unit
 const SPACING = 6.2; // world units between works along the path
+const HALL_HALF = 8; // the museum hall is 16 units wide; each room's world lies beyond its windows
 const ORBIT_UNITS = 34; // virtual distance used to turn 360 degrees inside the ring room
 
 function node(tag, className, text) {
@@ -273,10 +274,13 @@ function assignFloors(rooms) {
       const taken = new Set(rooms.map((_, k) => (k === i ? null : FLOORS[pick[k]])).filter(Boolean));
       room.floor = (ranked.find(([kind, v]) => v >= best * 0.85 && !taken.has(kind) && !used.has(kind)) || ranked[0])[0];
     }
+    if (room.ring) room.floor = "water"; // the walk ends outdoors, on still water
     used.add(room.floor);
     // say why, in plain words, in the "why this room?" panel
     const lean = FLOORS.map((kind) => [kind, groundScore(room, kind)]).sort((a, b) => b[1] - a[1]);
-    room.floorNote = `You walk on ${FLOOR_LABEL[room.floor]}${lean[0][0] === room.floor ? ", the ground that fits these works best" : ", a ground that suits these works (another room claimed its first choice)"}.`;
+    room.floorNote = room.ring
+      ? "The walk ends outside the museum, on still water."
+      : `Through the windows: ${FLOOR_LABEL[room.floor]}, painted from these works.`;
   });
 }
 
@@ -702,6 +706,27 @@ export function initGallery(items, model, themes = []) {
       ? `${saved} work${saved === 1 ? "" : "s"} you saved at checkpoints joined your gallery. Your rooms regrouped around them.`
       : "Your rooms regrouped around your latest choices."));
   });
+  // ---------- full-screen walk ----------
+  // Walking (scrolling) fades the header and buttons away; pausing, tapping, keyboard focus or reaching
+  // for the top or bottom edge brings them back.
+  let immerseTimer = 0;
+  const setImmersed = (on) => document.body.classList.toggle("is-immersed", on && document.body.classList.contains("gallery-full"));
+  window.addEventListener("scroll", () => {
+    if (!document.body.classList.contains("gallery-full") || dialog.open) return;
+    const walked = scrollProgress() * (layout.total + 6) - 6;
+    if (walked < 0) { setImmersed(false); return; } // not while the opening is on screen
+    setImmersed(true);
+    clearTimeout(immerseTimer);
+    immerseTimer = setTimeout(() => setImmersed(false), 1500);
+  }, { passive: true });
+  stage.addEventListener("pointermove", (event) => {
+    if (event.pointerType !== "mouse") return;
+    const bounds = stage.getBoundingClientRect();
+    if (event.clientY - bounds.top < 120 || bounds.bottom - event.clientY < 120) { clearTimeout(immerseTimer); setImmersed(false); }
+  });
+  stage.addEventListener("pointerdown", () => { clearTimeout(immerseTimer); setImmersed(false); });
+  document.addEventListener("focusin", (event) => { if (event.target.closest?.(".sitebar, .gallery-hud")) setImmersed(false); });
+
   const notice = $("#gallery-notice");
   let noticeTimer = 0;
   function notify(text) {
@@ -1366,7 +1391,7 @@ export function initGallery(items, model, themes = []) {
     // Nothing here is a fixed scene. Every quantity (how far the shore is, how tall the hills, whether
     // trees droop or point, how ordered the buildings are, what falls from the sky) is a function of
     // the dials, so each room is its own point in a continuous design space.
-    function generate({ group, r, z0, len, D, c, ring, floor = "water", first = false }) {
+    function generate({ group, r, z0, len, D, c, ring, floor = "water", first = false, indoor = false }) {
       const zc = z0 - len / 2;
       const half = len / 2 + 12;
       const gap = ring ? 22 : 7 + D.wet * 15 + (1 - D.crowd) * 5;
@@ -1405,7 +1430,7 @@ export function initGallery(items, model, themes = []) {
       const snow = new THREE.Color(0xe9eef4);
       const lush = clamp01(D.growth * 1.3 - 0.1) * (0.4 + 0.6 * D.wet);
       const low = earth.clone().lerp(green, lush).lerp(sand, dune * 0.8);
-      {
+      if (!indoor) { // inside the museum there's no open terrain: the land is what you see through the windows
         const rows = Math.max(24, Math.round((len + 24) / 1.5));
         const geo = track(new THREE.PlaneGeometry(170, len + 24, 128, rows).rotateX(-Math.PI / 2));
         const pos = geo.attributes.position;
@@ -1442,7 +1467,7 @@ export function initGallery(items, model, themes = []) {
       // ----- growth: grass, flowers, trees whose form follows the dials -----
       const F = clamp01(D.growth * 1.5 - 0.3);
       const grassCol = green.clone().lerp(new THREE.Color(0xc2a35a), clamp01((D.warmth - 0.5) * 1.2 + (1 - D.wet) * 0.4));
-      if (F > 0.02) {
+      if (F > 0.02 && !indoor) {
         const blades = many(Math.round(3400 * F * (0.45 + 0.55 * D.crowd)), () => spot(gap + 0.5, 40));
         const blade = new THREE.ConeGeometry(0.05, 0.9, 3, 3).translate(0, 0.45, 0);
         if (blades.length) scatter(group, blade, sway(new THREE.MeshLambertMaterial({ color: 0xffffff }), +(0.08 + D.storm * 0.4).toFixed(2)), blades.length, (i, col) => ({
@@ -1495,7 +1520,7 @@ export function initGallery(items, model, themes = []) {
 
       // ----- the water's edge: lily pads where it is wet, green and calm; reeds at the shore -----
       const marsh = D.wet * D.growth * (1 - D.storm * 0.7);
-      if (marsh > 0.12 && floor === "water") {
+      if (marsh > 0.12 && floor === "water" && !indoor) {
         const pad = new THREE.CircleGeometry(0.5, 22, 0.35, Math.PI * 2 - 0.35).rotateX(-Math.PI / 2);
         const padColor = c.mid.clone().lerp(new THREE.Color(0x4f7a4a), 0.55);
         const pads = [];
@@ -1511,7 +1536,7 @@ export function initGallery(items, model, themes = []) {
         });
       }
       const reedAmount = D.wet * clamp01(D.growth * 1.4 - 0.2);
-      if (reedAmount > 0.15 && !ring && floor === "water") {
+      if (reedAmount > 0.15 && !ring && floor === "water" && !indoor) {
         scatter(group, new THREE.CylinderGeometry(0.02, 0.035, 1, 4).translate(0, 0.5, 0), sway(new THREE.MeshLambertMaterial({ color: grassCol.clone().multiplyScalar(0.7) }), 0.12), 700 * reedAmount, () => ({
           x: side(r, gap - 2.5, gap + 2), y: -0.2, z: zc + (r() - 0.5) * len, rz: (r() - 0.5) * 0.25, sy: 1 + r() * 1.6, s: 1,
         }));
@@ -1520,7 +1545,7 @@ export function initGallery(items, model, themes = []) {
       // ----- structures: towers (futuristic), columns (ancient, ordered), monoliths (sparse, vast) -----
       const B = clamp01(1.4 * (1 - D.growth) - 0.2);
       const buildingCount = Math.round(B * (5 + 80 * D.crowd * (0.5 + D.scale * 0.5)));
-      if (buildingCount) {
+      if (buildingCount && !indoor) {
         const spacing = 4.5 + (1 - D.crowd) * 7;
         const jitter = 1 - D.order;
         const weights = [0.25 + D.era * 1.2, (1 - D.era) * (0.3 + D.order), (1 - D.crowd) * D.scale * 1.2 + D.dream * 0.3];
@@ -1585,7 +1610,7 @@ export function initGallery(items, model, themes = []) {
       }
 
       // ----- floating islands: weightless rooms lift pieces of land into the air -----
-      if (lift > 0) {
+      if (lift > 0 && !indoor) {
         const islandCount = Math.round(3 + lift * 9);
         const under = track(new THREE.ConeGeometry(1, 1.8, 9).rotateX(Math.PI).translate(0, -0.9, 0));
         const lid = track(new THREE.CylinderGeometry(1, 1, 0.25, 9).translate(0, 0.12, 0));
@@ -1624,7 +1649,7 @@ export function initGallery(items, model, themes = []) {
       }
 
       // ----- framing the path: colonnades and arches (ordered), lamps or floating lanterns (night) -----
-      if (!ring) {
+      if (!ring && !indoor) {
         const colonnade = D.order * (0.35 + (1 - D.growth) * 0.65);
         if (colonnade > 0.32) {
           const step = 6.4 + (1 - D.order) * 5;
@@ -1765,18 +1790,106 @@ export function initGallery(items, model, themes = []) {
 
       // ----- weather: rain (wet), snow (cold), blown dust (dry, turbulent), embers (hot), fireflies, rising motes -----
       const rain = clamp01((D.wet - 0.55) * 2.6) * (0.35 + 0.65 * D.storm);
-      if (rain > 0.05) weather({ group, r, zc, len, count: 2600 * rain, color: c.light, velocity: [-2 * D.storm, -18, 0], streak: 0.55, opacity: 0.35 });
+      const outside = indoor ? HALL_HALF + 1 : 0; // weather falls outside the windows, not in the hall
+      if (rain > 0.05) weather({ group, r, zc, len, outside, count: 2600 * rain, color: c.light, velocity: [-2 * D.storm, -18, 0], streak: 0.55, opacity: 0.35 });
       const snowfall = floor === "snow" ? Math.max(0.55, clamp01((0.42 - D.warmth) * 3)) : clamp01((0.42 - D.warmth) * 3) * (0.4 + 0.6 * D.wet);
-      if (snowfall > 0.05) weather({ group, r, zc, len, count: 2000 * snowfall, color: new THREE.Color(0xf4f7fb), velocity: [0.4 * D.storm, -1.2, 0], wobble: 0.6, size: 0.13 });
+      if (snowfall > 0.05) weather({ group, r, zc, len, outside, count: 2000 * snowfall, color: new THREE.Color(0xf4f7fb), velocity: [0.4 * D.storm, -1.2, 0], wobble: 0.6, size: 0.13 });
       const dust = clamp01((0.45 - D.wet) * 2.5) * clamp01(D.storm * 1.6 - 0.2);
-      if (dust > 0.05) weather({ group, r, zc, len, count: 1200 * dust, color: sand.clone().lerp(c.light, 0.3), velocity: [3 + 6 * D.storm, 0.1, 0], wobble: 0.4, size: 0.09, opacity: 0.5 });
+      if (dust > 0.05) weather({ group, r, zc, len, outside, count: 1200 * dust, color: sand.clone().lerp(c.light, 0.3), velocity: [3 + 6 * D.storm, 0.1, 0], wobble: 0.4, size: 0.09, opacity: 0.5 });
       const embers = clamp01((D.warmth - 0.55) * 2.5) * clamp01((D.storm - 0.4) * 2.5 + D.ruin * 0.5);
-      if (embers > 0.05) weather({ group, r, zc, len, count: 500 * embers, color: new THREE.Color(0xff8a3d).lerp(c.glow, 0.3), velocity: [0.3, 1.4, 0], wobble: 0.5, size: 0.12 });
+      if (embers > 0.05) weather({ group, r, zc, len, outside, count: 500 * embers, color: new THREE.Color(0xff8a3d).lerp(c.glow, 0.3), velocity: [0.3, 1.4, 0], wobble: 0.5, size: 0.12 });
       const fireflies = D.night * D.growth * D.warmth;
-      if (fireflies > 0.12) weather({ group, r, zc, len, count: 600 * fireflies, color: new THREE.Color(0xfff0a0).lerp(c.glow, 0.3), velocity: [0, 0.05, 0], wobble: 1, size: 0.16, box: [24, 5] });
-      if (lift > 0.1) weather({ group, r, zc, len, count: 400 * lift, color: c.glow.clone().lerp(c.light, 0.5), velocity: [0, 0.6, 0], wobble: 0.3, size: 0.1, box: [30, 18] });
-      buildFloor({ group, sky, r, z0, zc, len, c, D, floor, ring, noise, first });
+      if (fireflies > 0.12) weather({ group, r, zc, len, outside, count: 600 * fireflies, color: new THREE.Color(0xfff0a0).lerp(c.glow, 0.3), velocity: [0, 0.05, 0], wobble: 1, size: 0.16, box: [24, 5] });
+      if (lift > 0.1) weather({ group, r, zc, len, outside, count: 400 * lift, color: c.glow.clone().lerp(c.light, 0.5), velocity: [0, 0.6, 0], wobble: 0.3, size: 0.1, box: [30, 18] });
+      if (indoor) {
+        // the theme's ground lies just below the hall floor, out past the windows
+        const land = new THREE.Group();
+        land.position.y = -0.6;
+        group.add(land);
+        buildFloor({ group: land, sky, r, z0, zc, len, c, D, floor, ring, noise, first, inner: HALL_HALF + 1 });
+      } else {
+        buildFloor({ group, sky, r, z0, zc, len, c, D, floor, ring, noise, first });
+      }
       return { rain };
+    }
+
+    // ----- the museum hall: one cohesive building; each room's theme is what you see through its windows -----
+    const hallFloorTexture = canvasTexture(THREE, 512, 512, (ctx, w, h) => {
+      ctx.fillStyle = "#d8d0c3"; ctx.fillRect(0, 0, w, h);
+      for (let i = 0; i < 2600; i++) { // fine stone grain
+        ctx.fillStyle = `rgba(${90 + Math.random() * 40},${80 + Math.random() * 30},${70 + Math.random() * 20},${Math.random() * 0.05})`;
+        ctx.fillRect(Math.random() * w, Math.random() * h, 2, 2);
+      }
+      ctx.strokeStyle = "rgba(70,60,50,.28)"; ctx.lineWidth = 2;
+      for (let k = 0; k <= 2; k++) { ctx.beginPath(); ctx.moveTo(0, (k * h) / 2); ctx.lineTo(w, (k * h) / 2); ctx.stroke(); }
+      ctx.beginPath(); ctx.moveTo(w / 2, 0); ctx.lineTo(w / 2, h / 2); ctx.moveTo(w / 4, h / 2); ctx.lineTo(w / 4, h); ctx.moveTo((3 * w) / 4, h / 2); ctx.lineTo((3 * w) / 4, h); ctx.stroke();
+    });
+    hallFloorTexture.wrapS = hallFloorTexture.wrapT = THREE.RepeatWrapping;
+
+    function buildHall({ group, z0, len, c, D, first, exit }) {
+      // A glass pavilion: tall windows almost floor to ceiling, separated by slim piers, so the room's world
+      // fills both sides as you walk.
+      const H = HALL_HALF, wallH = 8.2, thick = 0.45, sill = 0.35, winH = 6.7;
+      const zStart = z0 + (first ? 10 : 0), zEnd = z0 - len, L = zStart - zEnd, zc = (zStart + zEnd) / 2;
+      const nBays = Math.max(2, Math.round(L / 6.5)), bay = L / nBays, winW = Math.max(3.4, bay - 1.1);
+      const plaster = track(new THREE.MeshStandardMaterial({ color: new THREE.Color(0xe9e3d8).lerp(c.light, 0.05), roughness: 0.93 }));
+      const trim = track(new THREE.MeshStandardMaterial({ color: 0x2b2520, roughness: 0.45, metalness: 0.25 }));
+      const daylight = c.light.clone().lerp(new THREE.Color(0xfff2dc), 0.35);
+
+      // floor: pale stone that softly reflects the windows
+      const tex = hallFloorTexture.clone(); tex.needsUpdate = true; tex.repeat.set((2 * H) / 4, L / 4); track(tex);
+      const floorMesh = new THREE.Mesh(track(new THREE.PlaneGeometry(2 * H, L).rotateX(-Math.PI / 2)), track(new THREE.MeshStandardMaterial({ map: tex, roughness: 0.3, metalness: 0.05 })));
+      floorMesh.position.set(0, 0.02, zc);
+      group.add(floorMesh);
+
+      // walls: a base below the sills, a band above the windows, and piers between them (all instanced)
+      const boxes = [], trims = [], pools = [], beams = [];
+      for (const s of [-1, 1]) {
+        const x = s * (H + thick / 2);
+        boxes.push({ x, y: sill / 2, z: zc, sx: thick, sy: sill, sz: L });
+        boxes.push({ x, y: sill + winH + (wallH - sill - winH) / 2, z: zc, sx: thick, sy: wallH - sill - winH, sz: L });
+        let prev = zStart;
+        for (let b = 0; b < nBays; b++) {
+          const zb = zStart - (b + 0.5) * bay;
+          const pierLen = prev - (zb + winW / 2);
+          if (pierLen > 0.01) boxes.push({ x, y: sill + winH / 2, z: prev - pierLen / 2, sx: thick, sy: winH, sz: pierLen });
+          prev = zb - winW / 2;
+          // slim dark window frames: a center mullion, a transom, and a surround
+          const ix = s * (H + 0.02);
+          trims.push({ x: ix, y: sill + winH / 2, z: zb, sx: 0.07, sy: winH, sz: 0.07 });
+          trims.push({ x: ix, y: sill + winH * 0.76, z: zb, sx: 0.07, sy: 0.07, sz: winW });
+          trims.push({ x: ix, y: sill, z: zb, sx: 0.12, sy: 0.1, sz: winW + 0.2 }, { x: ix, y: sill + winH, z: zb, sx: 0.12, sy: 0.1, sz: winW + 0.2 });
+          // daylight coming in: a soft pool on the floor and a slanting beam
+          pools.push({ x: s * (H - 2.8), y: 0.035, z: zb, sx: 5, sy: 1, sz: winW * 1.05 });
+          beams.push({ x: s * (H - 1.8), y: 3.6, z: zb, rz: s * 0.55, sx: winW * 0.7, sy: 9, sz: 1 });
+        }
+        const pierLen = prev - zEnd;
+        if (pierLen > 0.01) boxes.push({ x, y: sill + winH / 2, z: prev - pierLen / 2, sx: thick, sy: winH, sz: pierLen });
+        trims.push({ x: s * (H - 0.03), y: 0.1, z: zc, sx: 0.06, sy: 0.2, sz: L }); // baseboard
+        trims.push({ x: s * (H - 0.06), y: wallH - 0.15, z: zc, sx: 0.12, sy: 0.3, sz: L }); // cornice
+      }
+      // ceiling beams over every pier, and a long skylight down the middle
+      for (let b = 0; b <= nBays; b++) trims.push({ x: 0, y: wallH - 0.22, z: zStart - b * bay, sx: 2 * H, sy: 0.4, sz: 0.45 });
+      // doorways: an arched opening between rooms, and a wide one out of the museum at the end
+      const doorway = (z, opening) => {
+        const side = H - opening / 2;
+        for (const s of [-1, 1]) boxes.push({ x: s * (opening / 2 + side / 2), y: wallH / 2, z, sx: side, sy: wallH, sz: thick });
+        boxes.push({ x: 0, y: 6 + (wallH - 6) / 2, z, sx: opening, sy: wallH - 6, sz: thick });
+        trims.push({ x: 0, y: 6, z: z + thick / 2 + 0.02, sx: opening + 0.3, sy: 0.18, sz: 0.06 });
+        for (const s of [-1, 1]) trims.push({ x: s * (opening / 2 + 0.08), y: 3, z: z + thick / 2 + 0.02, sx: 0.16, sy: 6, sz: 0.06 });
+      };
+      if (!first) doorway(z0, 4.6);
+      if (exit) doorway(zEnd, 7);
+
+      const box = new THREE.BoxGeometry(1, 1, 1);
+      scatter(group, box, plaster, boxes.length, (i) => boxes[i]);
+      scatter(group, box.clone(), trim, trims.length, (i) => trims[i]);
+      // a warm wooden ceiling: the light comes from the windows, not from above
+      const ceiling = new THREE.Mesh(track(new THREE.PlaneGeometry(2 * H, L).rotateX(Math.PI / 2)), track(new THREE.MeshStandardMaterial({ color: 0x5a4636, roughness: 0.75 })));
+      ceiling.position.set(0, wallH, zc);
+      group.add(ceiling);
+      scatter(group, new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: glowTexture, color: daylight, transparent: true, opacity: 0.16 + (1 - D.night) * 0.12, blending: THREE.AdditiveBlending, depthWrite: false }), pools.length, (i) => pools[i]);
+      scatter(group, new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: shaftTexture, color: daylight, transparent: true, opacity: 0.05 + (1 - D.night) * 0.07, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }), beams.length, (i) => beams[i]);
     }
 
     // ----- the ground: eight kinds, each with its own texture, light and set pieces -----
@@ -1820,7 +1933,9 @@ export function initGallery(items, model, themes = []) {
       }
     }
 
-    function buildFloor({ group, sky, r, z0, zc: roomCenter, len, c, D, floor, ring, noise, first }) {
+    function buildFloor({ group, sky, r, z0, zc: roomCenter, len, c, D, floor, ring, noise, first, inner = 0 }) {
+      // indoors, everything scattered on the ground stays outside the hall's walls (|x| > inner)
+      const X = (spread) => (inner ? side(r, inner, inner + spread / 2) : (r() - 0.5) * spread);
       if (floor === "water") return;
       // Grounds meet at the room's edges (a sliver of overlap), so nothing spills into the next room.
       // The first room's ground also reaches back under the starting point.
@@ -1847,27 +1962,27 @@ export function initGallery(items, model, themes = []) {
         const bladeCol = meadow ? new THREE.Color(0x9bbd5a).lerp(c.light, 0.15) : new THREE.Color(0x4f7a3a);
         const count = Math.min(finePointer ? 7000 : 3500, Math.round(L * (meadow ? 120 : 50)));
         scatter(group, blade, sway(new THREE.MeshLambertMaterial({ color: 0xffffff }), meadow ? 0.18 : 0.08), count, (i, col) => {
-          let x = (r() - 0.5) * 40;
-          if (Math.abs(x) < 1 && r() < 0.85) x += x < 0 ? -1 : 1; // a faint trail where people have walked
+          let x = X(40);
+          if (!inner && Math.abs(x) < 1 && r() < 0.85) x += x < 0 ? -1 : 1; // a faint trail where people have walked
           return { x, y: 0, z: zc + (r() - 0.5) * L, ry: r() * 6, rz: (r() - 0.5) * 0.3, s: meadow ? 0.6 + r() * 0.9 : 0.4 + r() * 0.5,
             color: col.copy(bladeCol).offsetHSL((r() - 0.5) * 0.06, 0, (r() - 0.5) * 0.16).clone() };
         });
         if (meadow) {
           scatter(group, new THREE.IcosahedronGeometry(0.035, 1), new THREE.MeshBasicMaterial({ color: 0xffffff }), 900, () => {
             const pick = r();
-            return { x: side(r, 1.6, 18), y: 0.55 + r() * 0.5, z: zc + (r() - 0.5) * L, s: 0.7 + r() * 0.8, color: new THREE.Color(pick < 0.4 ? 0xfff3c9 : pick < 0.7 ? 0xf4b3c2 : 0xb9a3f0) };
+            return { x: inner ? X(20) : side(r, 1.6, 18), y: 0.55 + r() * 0.5, z: zc + (r() - 0.5) * L, s: 0.7 + r() * 0.8, color: new THREE.Color(pick < 0.4 ? 0xfff3c9 : pick < 0.7 ? 0xf4b3c2 : 0xb9a3f0) };
           });
-          lightShafts(group, r, zc, len, c.light.clone().lerp(new THREE.Color(0xfff0c0), 0.5), 7, 0.16);
+          if (!inner) lightShafts(group, r, zc, len, c.light.clone().lerp(new THREE.Color(0xfff0c0), 0.5), 7, 0.16);
         } else {
           // fallen leaves and glowing mushrooms
           scatter(group, new THREE.PlaneGeometry(0.16, 0.1).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide }), 1400, () => ({
-            x: (r() - 0.5) * 30, y: 0.03, z: zc + (r() - 0.5) * L, ry: r() * 6.28, color: new THREE.Color(r() < 0.5 ? 0xb5652d : 0xd9a441).lerp(c.accent, 0.2),
+            x: X(30), y: 0.03, z: zc + (r() - 0.5) * L, ry: r() * 6.28, color: new THREE.Color(r() < 0.5 ? 0xb5652d : 0xd9a441).lerp(c.accent, 0.2),
           }));
           const cap = new THREE.SphereGeometry(0.12, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2);
           scatter(group, cap, new THREE.MeshBasicMaterial({ color: 0xffffff }), 90, () => ({
-            x: side(r, 2.3, 10), y: 0.04, z: zc + (r() - 0.5) * L, s: 0.35 + r() * 0.6, color: c.glow.clone().lerp(new THREE.Color(0x9cff9c), 0.4),
+            x: inner ? X(16) : side(r, 2.3, 10), y: 0.04, z: zc + (r() - 0.5) * L, s: 0.35 + r() * 0.6, color: c.glow.clone().lerp(new THREE.Color(0x9cff9c), 0.4),
           }));
-          lightShafts(group, r, zc, len, new THREE.Color(0xd8ffb0).lerp(c.light, 0.3), 9, 0.13);
+          if (!inner) lightShafts(group, r, zc, len, new THREE.Color(0xd8ffb0).lerp(c.light, 0.3), 9, 0.13);
         }
       } else if (floor === "marble") {
         const tiles = track(canvasTexture(THREE, 512, 512, (ctx, w, h) => {
@@ -1887,7 +2002,7 @@ export function initGallery(items, model, themes = []) {
         const court = new THREE.Mesh(track(new THREE.PlaneGeometry(W, L).rotateX(-Math.PI / 2)), track(new THREE.MeshPhongMaterial({ map: tiles, color: c.light.clone().lerp(new THREE.Color(0xffffff), 0.5), specular: 0x555555, shininess: 70 })));
         court.position.set(0, y0, zc);
         group.add(court);
-        lightShafts(group, r, zc, len, c.light.clone().lerp(new THREE.Color(0xfff1d6), 0.6), 6, 0.14);
+        if (!inner) lightShafts(group, r, zc, len, c.light.clone().lerp(new THREE.Color(0xfff1d6), 0.6), 6, 0.14);
       } else if (floor === "snow") {
         const snow = new THREE.Color(0xdfe7f1), blue = new THREE.Color(0x9fb3cf);
         group.add(groundPlane(W, L, zc, 120, Math.round(L), (x, z, col) => {
@@ -1896,7 +2011,7 @@ export function initGallery(items, model, themes = []) {
           return y0 + drift * 0.35 * clamp01((Math.abs(x) - 1.5) / 8);
         }, new THREE.MeshLambertMaterial({ vertexColors: true })));
         const n = 700, pos = new Float32Array(n * 3);
-        for (let i = 0; i < n; i++) pos.set([(r() - 0.5) * 30, 0.06, zc + (r() - 0.5) * L], i * 3);
+        for (let i = 0; i < n; i++) pos.set([X(30), 0.06, zc + (r() - 0.5) * L], i * 3);
         const geo = track(new THREE.BufferGeometry()); geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
         const mat = track(new THREE.PointsMaterial({ size: 0.07, map: glowTexture, color: 0xffffff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }));
         group.add(new THREE.Points(geo, mat));
@@ -1934,7 +2049,7 @@ export function initGallery(items, model, themes = []) {
         const mat = track(new THREE.SpriteMaterial({ map: glowTexture, color: c.light.clone().lerp(new THREE.Color(0xffffff), 0.5), transparent: true, opacity: 0.55, depthWrite: false }));
         for (let i = 0; i < 46; i++) {
           const s = new THREE.Sprite(mat);
-          const base = { x: side(r, 1.6, 30), y: -0.2 + r() * 1.4, z: zc + (r() - 0.5) * L, s: 4 + r() * 12, p: r() * 6 };
+          const base = { x: inner ? X(40) : side(r, 1.6, 30), y: -0.2 + r() * 1.4, z: zc + (r() - 0.5) * L, s: 4 + r() * 12, p: r() * 6 };
           s.scale.set(base.s * 1.6, base.s * 0.6, 1);
           group.add(s);
           animators.push((t) => { s.position.set(base.x + Math.sin(t * 0.05 + base.p) * 1.5, base.y, base.z); });
@@ -1943,11 +2058,15 @@ export function initGallery(items, model, themes = []) {
     }
 
     // Falling, drifting or rising particles inside a box around the path, wrapped so they never run out.
-    function weather({ group, r, zc, len, count, color, velocity, wobble = 0, streak = 0, size = 0.1, opacity = 0.8, box = [40, 16] }) {
+    function weather({ group, r, zc, len, count, color, velocity, wobble = 0, streak = 0, size = 0.1, opacity = 0.8, box = [40, 16], outside = 0 }) {
       count = Math.max(1, Math.round(count));
       const [bw, bh] = box;
       const base = new Float32Array(count * 3);
-      for (let i = 0; i < count; i++) base.set([(r() - 0.5) * bw * 2, r() * bh, zc + (r() - 0.5) * len], i * 3);
+      const sides = new Int8Array(count);
+      for (let i = 0; i < count; i++) {
+        sides[i] = r() < 0.5 ? -1 : 1;
+        base.set([outside ? r() * (bw - outside) : (r() - 0.5) * bw * 2, r() * bh, zc + (r() - 0.5) * len], i * 3);
+      }
       const per = streak ? 2 : 1;
       const pos = new Float32Array(count * 3 * per);
       const geo = track(new THREE.BufferGeometry());
@@ -1964,7 +2083,9 @@ export function initGallery(items, model, themes = []) {
         for (let i = 0; i < count; i++) {
           const k = i * 3;
           const w = wobble ? Math.sin(t * 0.7 + i) * wobble : 0;
-          const x = wrap(base[k] + velocity[0] * t + w, -bw, bw * 2);
+          const x = outside
+            ? sides[i] * (outside + wrap(base[k] + velocity[0] * t * sides[i] + w, 0, bw - outside))
+            : wrap(base[k] + velocity[0] * t + w, -bw, bw * 2);
           const y = wrap(base[k + 1] + velocity[1] * t, 0, bh);
           const z = base[k + 2] + velocity[2] * t + (wobble ? Math.cos(t * 0.5 + i * 1.3) * wobble * 0.6 : 0);
           const o = k * per;
@@ -2063,7 +2184,10 @@ export function initGallery(items, model, themes = []) {
         const z0 = -z;
         const D = room.design;
         const floor = room.floor || "water";
-        const { rain } = generate({ group, r, z0, len, D, c, ring: room.ring, floor, first: index === 0 });
+        // every room but the last is inside the museum; the last one is outdoors, on the water
+        const indoor = !room.ring;
+        const { rain } = generate({ group, r, z0, len, D, c, ring: room.ring, floor, first: index === 0, indoor });
+        if (indoor) buildHall({ group, z0, len, c, D, first: index === 0, exit: !roomList[index + 1] || roomList[index + 1].ring });
         // Bright rooms (snow, marble, clouds, sand, or any daylit room) get less sky light, a little less
         // exposure and glow only on truly bright lights, so they glow instead of glaring. The neon grid glows most.
         const bright = ["snow", "marble", "clouds", "sand"].includes(floor) || D.night < 0.35;
@@ -2074,7 +2198,8 @@ export function initGallery(items, model, themes = []) {
           bloomThreshold: bright ? 1.05 : 0.85,
           density: ((room.ring ? 0.016 : 0.012) + D.wet * 0.012 + D.storm * 0.006 + (1 - D.scale) * 0.005
             + clamp01((0.85 - room.coherence) / 0.35) * 0.012)
-            * ({ water: 1, sand: 0.7, meadow: 0.85, marble: 0.6, snow: 0.55, neon: 0.65, clouds: 0.8, forest: 1.1 }[floor] ?? 1),
+            * ({ water: 1, sand: 0.7, meadow: 0.85, marble: 0.6, snow: 0.55, neon: 0.65, clouds: 0.8, forest: 1.1 }[floor] ?? 1)
+            * (indoor ? 0.7 : 1),
           ripple: 0.22 + D.storm * 0.9 + D.wet * 0.25 + rain * 0.4,
           exposure: (floor === "neon" ? 0.95 : floor === "snow" ? 0.9 : bright ? 0.95 : 1.05) - D.night * 0.2,
           hemi: 0.85 + (1 - D.night) * 0.85,
@@ -2101,11 +2226,18 @@ export function initGallery(items, model, themes = []) {
             entries.push(entry);
           });
         } else {
-          const backdrop = new THREE.Mesh(track(new THREE.PlaneGeometry(64, 30)), paintPlane(heroTexture, c, 1, 1));
-          backdrop.position.set(0, 13, z0 - len - 8);
-          group.add(backdrop);
-          room.paint = backdrop.material;
-          room.backdropDistance = z + len + 8;
+          // Through the windows: a painterly landscape made from this room's own photos, on each side.
+          const photos = room.works.filter((item) => item.kind === "photo" && colorCache.has(item.id));
+          const second = photos.find((item) => item !== hero);
+          const secondTexture = second ? await loadTexture(second) : heroTexture;
+          room.paints = [];
+          [[-1, heroTexture], [1, secondTexture]].forEach(([s, texture]) => {
+            const vista = new THREE.Mesh(track(new THREE.PlaneGeometry(len + 40, 34)), paintPlane(texture, c, 1, 1));
+            vista.position.set(s * 34, 11, z0 - len / 2);
+            vista.rotation.y = -s * Math.PI / 2;
+            group.add(vista);
+            room.paints.push(vista.material);
+          });
           room.works.forEach((item, i) => {
             const sideSign = i % 2 === 0 ? -1 : 1;
             const distance = z + 10 + i * SPACING;
@@ -2212,11 +2344,11 @@ export function initGallery(items, model, themes = []) {
       updateControls(cam.distance, p);
 
       for (const room of rooms) {
-        if (!room.paint) continue;
-        room.paint.uniforms.uTime.value = t;
-        room.paint.uniforms.uFogDensity.value = scene.fog.density;
-        room.paint.uniforms.uFogColor.value.copy(scene.fog.color);
-        if (room.backdropDistance) room.paint.uniforms.uOpacity.value = Math.max(0, Math.min(1, (room.backdropDistance - walk - 6) / 16));
+        for (const paint of room.paints || (room.paint ? [room.paint] : [])) {
+          paint.uniforms.uTime.value = t;
+          paint.uniforms.uFogDensity.value = scene.fog.density;
+          paint.uniforms.uFogColor.value.copy(scene.fog.color);
+        }
       }
       if (water) water.material.uniforms.uTime.value = t;
       for (const layer of skies) {

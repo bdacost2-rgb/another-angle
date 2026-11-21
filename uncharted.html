@@ -139,6 +139,18 @@ details.how li { margin: 6px 0; }
 .shell.gallery-mode { grid-template-columns: minmax(0, 1fr); }
 .shell.gallery-mode .rail { display: none; }
 .shell.gallery-mode .pane-gallery { padding: 0; }
+/* full-screen walk: in the gallery the header floats over the scene, and while you walk the header and
+   buttons fade away so the scene fills the screen; they return when you pause, tap or reach for an edge */
+body.gallery-full { --bar: 67px; }
+body.gallery-full .sitebar { position: fixed; left: 0; right: 0; top: 0; transition: transform .6s cubic-bezier(.22,1,.36,1), opacity .5s ease; }
+body.gallery-full.is-immersed .sitebar { transform: translateY(-100%); opacity: 0; pointer-events: none; }
+body.gallery-full .gallery-stage { top: 0; height: 100dvh; }
+body.gallery-full .gallery-hud--top { top: calc(var(--bar) + 18px); }
+body.gallery-full .gallery-notice { top: calc(var(--bar) + 70px); }
+.gallery-hud--top, .gallery-right, .gallery-scroll-cue, .gallery-scrim--top, .uc-showme--gallery { transition: opacity .5s ease; }
+body.is-immersed .gallery-hud--top, body.is-immersed .gallery-right, body.is-immersed .gallery-scroll-cue, body.is-immersed .gallery-scrim--top { opacity: 0; pointer-events: none; }
+body.is-immersed .gallery-hud--top * { pointer-events: none; }
+@media (max-width: 640px) { body.gallery-full { --bar: 82px; } }
 .rail { position: sticky; top: 67px; align-self: start; height: calc(100dvh - 67px); display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 0 0 0 24px; border-right: 1px solid var(--line); }
 .rail button { position: relative; display: flex; align-items: baseline; gap: 10px; padding: 10px 0; background: none; border: 0; cursor: pointer; text-align: left; font: 500 13px var(--body); letter-spacing: -.01em; color: var(--ink); opacity: .42; transition: opacity .2s, transform .35s cubic-bezier(.22,1,.36,1); }
 .rail button span { font: 400 10px var(--mono); letter-spacing: 0; color: var(--muted); }

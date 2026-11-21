@@ -355,6 +355,7 @@ const PANES=['seed','gallery','map','checkpoint','logbook']; let pane=DATA && DA
 const railOf = name => name==='checkpoint' ? 'map' : name;
 function go(name){ clearTimeout(paneTimer); pane=name;
   document.querySelector('.shell').classList.toggle('gallery-mode', name==='gallery');
+  document.body.classList.toggle('gallery-full', name==='gallery'); if (name!=='gallery') document.body.classList.remove('is-immersed');
   PANES.forEach(n=>{ $('pane-'+n).hidden = n!==name; });
   document.querySelectorAll('.rail [data-pane]').forEach(b=>{ if (b.dataset.pane===railOf(name)){ b.setAttribute('aria-current','true'); b.removeAttribute('data-new'); } else b.removeAttribute('aria-current'); });
   if (name==='gallery' && document.activeElement?.closest('.rail')) $('gallery-stage').focus({preventScroll:true});
