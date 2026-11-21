@@ -486,6 +486,43 @@ void main() {
   #include <colorspace_fragment>
 }`;
 
+// The room's sky as light: a gradient from ground to horizon to zenith with a sun, turned into an
+// environment map so physically based surfaces pick up believable reflections and fill light.
+const ENV_FRAGMENT = /* glsl */`
+uniform vec3 uTop;
+uniform vec3 uHorizon;
+uniform vec3 uGround;
+uniform vec3 uSun;
+uniform vec3 uSunDir;
+varying vec3 vDir;
+void main() {
+  vec3 d = normalize(vDir);
+  vec3 col = mix(uGround, uHorizon, smoothstep(-0.25, 0.02, d.y));
+  col = mix(col, uTop, smoothstep(0.02, 0.7, d.y));
+  float s = max(dot(d, uSunDir), 0.0);
+  col += uSun * (pow(s, 48.0) * 6.0 + pow(s, 6.0) * 0.6);
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+// The last step of the cinematic finish: a soft vignette and fine film grain, applied after tone mapping.
+const FINISH_SHADER = {
+  uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uGrain: { value: 0.04 }, uVignette: { value: 0.3 } },
+  vertexShader: "varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+  fragmentShader: /* glsl */`
+uniform sampler2D tDiffuse;
+uniform float uTime;
+uniform float uGrain;
+uniform float uVignette;
+varying vec2 vUv;
+float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+void main() {
+  vec4 c = texture2D(tDiffuse, vUv);
+  float v = 1.0 - uVignette * smoothstep(0.35, 0.95, length((vUv - 0.5) * vec2(1.15, 1.0)) * 1.25);
+  float g = (hash(vUv * vec2(1931.0, 1213.0) + fract(uTime * 7.0)) - 0.5) * uGrain;
+  gl_FragColor = vec4(c.rgb * v + g, c.a);
+}`,
+};
+
 // ---------- the gallery ----------
 
 export function initGallery(items, model, themes = []) {
@@ -1039,7 +1076,19 @@ export function initGallery(items, model, themes = []) {
     try {
       THREE = await import("three");
       const { Reflector } = await import("three/addons/objects/Reflector.js");
-      engine = createEngine(Reflector);
+      // The cinematic finish is optional: if these don't load, the gallery renders plainly.
+      let post = null;
+      try {
+        const [{ EffectComposer }, { RenderPass }, { UnrealBloomPass }, { BokehPass }, { ShaderPass }, { OutputPass }] = await Promise.all([
+          import("three/addons/postprocessing/EffectComposer.js"), import("three/addons/postprocessing/RenderPass.js"),
+          import("three/addons/postprocessing/UnrealBloomPass.js"), import("three/addons/postprocessing/BokehPass.js"),
+          import("three/addons/postprocessing/ShaderPass.js"), import("three/addons/postprocessing/OutputPass.js"),
+        ]);
+        post = { EffectComposer, RenderPass, UnrealBloomPass, BokehPass, ShaderPass, OutputPass };
+      } catch (error) {
+        console.warn("Gallery: post-processing unavailable", error);
+      }
+      engine = createEngine(Reflector, post);
       await loadDials();
     } catch (error) {
       console.warn("Gallery: WebGL unavailable", error);
@@ -1076,7 +1125,7 @@ export function initGallery(items, model, themes = []) {
     if (pendingEntry != null) { const index = pendingEntry; pendingEntry = null; requestAnimationFrame(() => changeRoom(index, true, true)); }
   }
 
-  function createEngine(Reflector) {
+  function createEngine(Reflector, post = null) {
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, finePointer ? 1.75 : 1.35));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -1091,6 +1140,81 @@ export function initGallery(items, model, themes = []) {
     const sun = new THREE.DirectionalLight(0xffffff, 1.3);
     sun.position.set(6, 14, 8);
     scene.add(hemi, sun);
+    scene.environmentIntensity = 0.85;
+
+    // ----- the cinematic finish: glow on bright lights, depth of field (desktop), grain and vignette -----
+    let composer = null, bloom = null, bokeh = null, finish = null, focusDistance = 10;
+    if (post) {
+      composer = new post.EffectComposer(renderer);
+      composer.addPass(new post.RenderPass(scene, camera));
+      if (finePointer) {
+        bokeh = new post.BokehPass(scene, camera, { focus: 10, aperture: 0.0009, maxblur: 0.0028 });
+        composer.addPass(bokeh);
+      }
+      bloom = new post.UnrealBloomPass(new THREE.Vector2(256, 256), 0.45, 0.6, 0.82);
+      composer.addPass(bloom);
+      composer.addPass(new post.OutputPass());
+      finish = new post.ShaderPass(FINISH_SHADER);
+      composer.addPass(finish);
+    }
+    // If the device struggles, shed the costly parts in order: depth of field, then glow, then resolution.
+    let runTime = 0, slowTime = 0;
+    const keepQuality = new URLSearchParams(location.search).has("hq"); // for screenshots on slow test machines
+    function adapt(dt) {
+      runTime += dt;
+      if (!composer || runTime < 5 || keepQuality) return;
+      slowTime = dt > 1 / 30 ? slowTime + dt : Math.max(0, slowTime - dt * 0.5);
+      if (slowTime < 2.5) return;
+      slowTime = 0;
+      if (bokeh?.enabled) bokeh.enabled = false;
+      else if (bloom?.enabled) bloom.enabled = false;
+      else if (renderer.getPixelRatio() > 1) { renderer.setPixelRatio(1); resize(); }
+    }
+
+    // ----- each room's sky becomes its light: a small environment map that surfaces reflect and glow with -----
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const envUniforms = {
+      uTop: { value: new THREE.Color() }, uHorizon: { value: new THREE.Color() }, uGround: { value: new THREE.Color() },
+      uSun: { value: new THREE.Color() }, uSunDir: { value: new THREE.Vector3(0.45, 0.32, -1).normalize() },
+    };
+    const envScene = new THREE.Scene();
+    envScene.add(new THREE.Mesh(new THREE.SphereGeometry(10, 48, 24), new THREE.ShaderMaterial({
+      uniforms: envUniforms, side: THREE.BackSide, depthWrite: false,
+      vertexShader: "varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+      fragmentShader: ENV_FRAGMENT,
+    })));
+    function makeEnvironment(c, D) {
+      envUniforms.uTop.value.copy(c.top);
+      envUniforms.uHorizon.value.copy(c.fog).lerp(c.light, 0.25);
+      envUniforms.uGround.value.copy(c.deep).multiplyScalar(0.6);
+      envUniforms.uSun.value.copy(c.light).lerp(c.glow, 0.3).multiplyScalar(0.4 + (1 - D.night) * 1.2);
+      const target = pmrem.fromScene(envScene, 0.04);
+      track(target);
+      return target.texture;
+    }
+
+    // Physically based materials everywhere, lit by the room's sky, so stone, sand and leaves read as real
+    // surfaces instead of flat color. Shared materials stay shared.
+    function upgradeMaterials(root) {
+      const swap = new Map();
+      root.traverse((o) => {
+        const m = o.material;
+        if (!m || Array.isArray(m) || !(m.isMeshLambertMaterial || m.isMeshPhongMaterial)) return;
+        let s = swap.get(m);
+        if (!s) {
+          s = new THREE.MeshStandardMaterial({
+            color: m.color, map: m.map, vertexColors: m.vertexColors, emissive: m.emissive, emissiveMap: m.emissiveMap,
+            emissiveIntensity: m.emissiveIntensity, transparent: m.transparent, opacity: m.opacity, side: m.side,
+            flatShading: m.flatShading, fog: m.fog, metalness: 0,
+            roughness: m.isMeshPhongMaterial ? Math.max(0.12, 1 - (m.shininess || 30) / 90) : 0.88,
+          });
+          if (m.userData.sway) { s.onBeforeCompile = m.onBeforeCompile; s.customProgramCacheKey = m.customProgramCacheKey; }
+          swap.set(m, s);
+          track(s);
+        }
+        o.material = s;
+      });
+    }
 
     const skyUniforms = { uTop: { value: new THREE.Color() }, uHorizon: { value: new THREE.Color() } };
     const sky = new THREE.Mesh(
@@ -1107,6 +1231,12 @@ export function initGallery(items, model, themes = []) {
     sky.renderOrder = -1;
     scene.add(sky);
 
+    // light from a picture lamp: brightest at the top of the work, fading down
+    const washTexture = canvasTexture(THREE, 4, 128, (ctx, w, h) => {
+      const g = ctx.createLinearGradient(0, 0, 0, h);
+      g.addColorStop(0, "rgba(255,255,255,1)"); g.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+    });
     const glowTexture = canvasTexture(THREE, 128, 128, (ctx, w) => {
       const g = ctx.createRadialGradient(w / 2, w / 2, 0, w / 2, w / 2, w / 2);
       g.addColorStop(0, "rgba(255,255,255,1)");
@@ -1184,12 +1314,15 @@ export function initGallery(items, model, themes = []) {
           "#include <begin_vertex>",
           `#include <begin_vertex>
           #ifdef USE_INSTANCING
+          // wind arrives in gusts that roll along the path, instead of everything swaying in step
           float phase = instanceMatrix[3].x * 0.3 + instanceMatrix[3].z * 0.45;
-          transformed.x += sin(uTime * 1.3 + phase) * position.y * ${amount.toFixed(2)};
-          transformed.z += cos(uTime * 1.1 + phase) * position.y * ${(amount * 0.6).toFixed(2)};
+          float gust = 0.35 + 0.65 * pow(0.5 + 0.5 * sin(uTime * 0.42 - instanceMatrix[3].z * 0.09 + instanceMatrix[3].x * 0.03), 2.0);
+          transformed.x += (sin(uTime * 1.3 + phase) * 0.55 + 0.45) * gust * position.y * ${amount.toFixed(2)};
+          transformed.z += cos(uTime * 1.05 + phase) * gust * position.y * ${(amount * 0.5).toFixed(2)};
           #endif`,
         );
       };
+      material.userData.sway = true;
       material.customProgramCacheKey = () => `sway-${amount}`;
       return material;
     }
@@ -1863,12 +1996,36 @@ export function initGallery(items, model, themes = []) {
       const width = Math.min(4.2, height * aspect);
       const h = width / aspect;
       const holder = new THREE.Group();
-      const frame = new THREE.Mesh(track(new THREE.BoxGeometry(width + 0.14, h + 0.14, 0.07)), track(new THREE.MeshLambertMaterial({ color: c.deep.clone().lerp(new THREE.Color(0x2a2118), 0.6) })));
+      // Hung like a museum piece: a cream mat around photographs, a wood frame, a thin sheen of glass,
+      // and a small picture lamp washing the work from above with a pool of light below.
+      const matBorder = isText ? 0 : 0.18;
+      const frame = new THREE.Mesh(track(new THREE.BoxGeometry(width + matBorder * 2 + 0.14, h + matBorder * 2 + 0.14, 0.08)), track(new THREE.MeshLambertMaterial({ color: c.deep.clone().lerp(new THREE.Color(0x2a2118), 0.6) })));
       frame.position.z = -0.05;
-      const art = new THREE.Mesh(track(new THREE.PlaneGeometry(width, h)), track(new THREE.MeshBasicMaterial({ map, toneMapped: false })));
-      const halo = new THREE.Mesh(track(new THREE.PlaneGeometry(width * 2.6, h * 2.4)), track(new THREE.MeshBasicMaterial({ map: glowTexture, color: c.glow, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending, depthWrite: false })));
+      // the finish pass tone-maps everything, so artwork is lifted slightly to keep its true brightness
+      const art = new THREE.Mesh(track(new THREE.PlaneGeometry(width, h)), track(new THREE.MeshBasicMaterial({ map, toneMapped: false, color: new THREE.Color(1, 1, 1).multiplyScalar(composer ? 1.22 : 1) })));
+      const halo = new THREE.Mesh(track(new THREE.PlaneGeometry(width * 2.6, h * 2.4)), track(new THREE.MeshBasicMaterial({ map: glowTexture, color: c.glow, transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending, depthWrite: false })));
       halo.position.z = -0.12;
       holder.add(halo, frame, art);
+      if (matBorder) {
+        const mat = new THREE.Mesh(track(new THREE.PlaneGeometry(width + matBorder * 2, h + matBorder * 2)), track(new THREE.MeshLambertMaterial({ color: 0xeee8dd })));
+        mat.position.z = -0.006;
+        holder.add(mat);
+      }
+      const glass = new THREE.Mesh(track(new THREE.PlaneGeometry(width + matBorder * 2, h + matBorder * 2)), track(new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.08, roughness: 0.05, metalness: 1, depthWrite: false })));
+      glass.position.z = 0.008;
+      const wash = new THREE.Mesh(track(new THREE.PlaneGeometry(width, h * 0.6)), track(new THREE.MeshBasicMaterial({ map: washTexture, color: c.light.clone().lerp(new THREE.Color(0xffe2b8), 0.6), transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false })));
+      wash.position.set(0, h * 0.2, 0.004);
+      const lamp = new THREE.Mesh(track(new THREE.BoxGeometry(Math.min(0.9, width * 0.45), 0.04, 0.07)), track(new THREE.MeshLambertMaterial({ color: 0x3a3026 })));
+      lamp.position.set(0, h / 2 + matBorder + 0.2, 0.16);
+      const bulb = new THREE.Sprite(track(new THREE.SpriteMaterial({ map: glowTexture, color: 0xffd9a0, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false })));
+      bulb.position.set(0, h / 2 + matBorder + 0.17, 0.2);
+      bulb.scale.setScalar(0.55);
+      holder.add(glass, wash, lamp, bulb);
+      if (entry.floor !== "clouds") {
+        const pool = new THREE.Mesh(track(new THREE.PlaneGeometry(3.4, 2.2).rotateX(-Math.PI / 2)), track(new THREE.MeshBasicMaterial({ map: glowTexture, color: 0xffe0b0, transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false })));
+        pool.position.set(0, -entry.position.y + 0.03, 0.9);
+        holder.add(pool);
+      }
       // How the work is shown depends on the ground: a standing stone wall in the marble court, a glowing
       // frame on the neon grid, floating higher over the clouds, and a wooden post on land.
       const floor = entry.floor || "water";
@@ -1932,13 +2089,19 @@ export function initGallery(items, model, themes = []) {
         const D = room.design;
         const floor = room.floor || "water";
         const { rain } = generate({ group, r, z0, len, D, c, ring: room.ring, floor, first: index === 0 });
+        // Bright rooms (snow, marble, clouds, sand, or any daylit room) get less sky light, a little less
+        // exposure and glow only on truly bright lights, so they glow instead of glaring. The neon grid glows most.
+        const bright = ["snow", "marble", "clouds", "sand"].includes(floor) || D.night < 0.35;
         roomEnvs.push({
-          start: z, len, c, floor,
+          start: z, len, c, floor, env: makeEnvironment(c, D),
+          envIntensity: bright ? 0.4 : 0.8,
+          bloomStrength: floor === "neon" ? 0.75 : bright ? 0.16 : 0.42,
+          bloomThreshold: bright ? 1.05 : 0.85,
           density: ((room.ring ? 0.016 : 0.012) + D.wet * 0.012 + D.storm * 0.006 + (1 - D.scale) * 0.005
             + clamp01((0.85 - room.coherence) / 0.35) * 0.012)
             * ({ water: 1, sand: 0.7, meadow: 0.85, marble: 0.6, snow: 0.55, neon: 0.65, clouds: 0.8, forest: 1.1 }[floor] ?? 1),
           ripple: 0.22 + D.storm * 0.9 + D.wet * 0.25 + rain * 0.4,
-          exposure: (floor === "neon" ? 0.95 : floor === "snow" ? 1.0 : 1.1) - D.night * 0.22,
+          exposure: (floor === "neon" ? 0.95 : floor === "snow" ? 0.9 : bright ? 0.95 : 1.05) - D.night * 0.2,
           hemi: 0.85 + (1 - D.night) * 0.85,
           sun: 0.45 + (1 - D.night) * 1.25,
         });
@@ -1983,6 +2146,7 @@ export function initGallery(items, model, themes = []) {
       }
       layout = { starts, ringCenter, total: ringCenter + (reducedMotion.matches ? 0 : ORBIT_UNITS), works: entries };
       journey.style.height = `calc(${Math.round((layout.total + 6) * UNIT_PX)}px + 100dvh)`;
+      upgradeMaterials(world);
       makeWater(z + 40);
       if (line) {
         line.querySelectorAll("i").forEach((tick) => tick.remove());
@@ -2018,8 +2182,16 @@ export function initGallery(items, model, themes = []) {
       hemi.groundColor.copy(mix("deep"));
       sun.color.copy(mix("light")).lerp(mix("glow"), 0.3);
       renderer.toneMappingExposure = a.exposure + (b.exposure - a.exposure) * k;
-      hemi.intensity = a.hemi + (b.hemi - a.hemi) * k;
-      sun.intensity = a.sun + (b.sun - a.sun) * k;
+      // the room's sky lights everything now, so the old fill light steps back
+      hemi.intensity = (a.hemi + (b.hemi - a.hemi) * k) * 0.45;
+      sun.intensity = (a.sun + (b.sun - a.sun) * k) * 0.9;
+      const env = (k > 0.5 ? b : a).env;
+      if (scene.environment !== env) scene.environment = env;
+      scene.environmentIntensity = a.envIntensity + (b.envIntensity - a.envIntensity) * k;
+      if (bloom) {
+        bloom.strength = a.bloomStrength + (b.bloomStrength - a.bloomStrength) * k;
+        bloom.threshold = a.bloomThreshold + (b.bloomThreshold - a.bloomThreshold) * k;
+      }
       if (water) {
         // the water only exists near rooms that stand on it (and costs nothing elsewhere)
         water.visible = roomEnvs.some((e) => e.floor === "water" && distance > e.start - 45 && distance < e.start + e.len + 25);
@@ -2044,7 +2216,7 @@ export function initGallery(items, model, themes = []) {
       timeUniform.value = t;
       const p = scrollProgress();
       const target = p * (layout.total + 6) - 6;
-      const ease = reducedMotion.matches ? 1 : 1 - Math.exp(-dt * 3.2);
+      const ease = reducedMotion.matches ? 1 : 1 - Math.exp(-dt * 2.4); // the camera settles like a steady glide
       cam.distance += (target - cam.distance) * ease;
       if (Math.abs(target - cam.distance) > 30) cam.distance = target - Math.sign(target - cam.distance) * 30;
       const walk = Math.min(cam.distance, layout.ringCenter);
@@ -2103,11 +2275,11 @@ export function initGallery(items, model, themes = []) {
           const facing = Math.sin(holder.rotation.y) * (camera.position.x - holder.position.x) + Math.cos(holder.rotation.y) * (camera.position.z - holder.position.z);
           holder.visible = facing > 0;
         }
-        const lift = reducedMotion.matches ? 0 : Math.sin(t * 0.8 + entry.phase) * (entry.bob ?? 0.05);
+        const lift = reducedMotion.matches ? 0 : Math.sin(t * 0.6 + entry.phase) * (entry.bob ?? 0.012); // works hang nearly still
         holder.position.y = entry.baseY + lift;
         const target = entry === hovered ? 1.06 : 1;
         holder.scale.setScalar(holder.scale.x + (target - holder.scale.x) * 0.12);
-        entry.halo.material.opacity += ((entry === hovered ? 0.7 : 0.3) - entry.halo.material.opacity) * 0.1;
+        entry.halo.material.opacity += ((entry === hovered ? 0.45 : 0.18) - entry.halo.material.opacity) * 0.1;
         if (!hovered) {
           const d = camera.position.distanceTo(holder.position);
           const ahead = new THREE.Vector3().subVectors(holder.position, camera.position).normalize().dot(camera.getWorldDirection(tmpV));
@@ -2115,7 +2287,18 @@ export function initGallery(items, model, themes = []) {
         }
       }
       setCaption(focus);
-      renderer.render(scene, camera);
+      if (composer) {
+        if (bokeh?.enabled) {
+          const want = focus?.holder ? camera.position.distanceTo(focus.holder.position) : 12;
+          focusDistance += (want - focusDistance) * 0.08;
+          bokeh.uniforms.focus.value = focusDistance;
+        }
+        finish.uniforms.uTime.value = reducedMotion.matches ? 0 : t;
+        composer.render(dt);
+      } else {
+        renderer.render(scene, camera);
+      }
+      adapt(dt);
     }
     const tmpV = new THREE.Vector3();
 
@@ -2127,6 +2310,7 @@ export function initGallery(items, model, themes = []) {
       const w = stage.clientWidth, h = stage.clientHeight;
       if (!w || !h) return;
       renderer.setSize(w, h, false);
+      if (composer) { composer.setPixelRatio(renderer.getPixelRatio()); composer.setSize(w, h); }
       camera.aspect = w / h;
       camera.fov = w < 640 ? 70 : 58;
       camera.updateProjectionMatrix();
