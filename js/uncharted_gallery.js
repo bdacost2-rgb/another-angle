@@ -288,24 +288,6 @@ function wrapLines(ctx, text, maxWidth) {
   return lines;
 }
 
-// The room's sky as light: a gradient from ground to horizon to zenith with a sun, turned into an
-// environment map so physically based surfaces pick up believable reflections and fill light.
-const ENV_FRAGMENT = /* glsl */`
-uniform vec3 uTop;
-uniform vec3 uHorizon;
-uniform vec3 uGround;
-uniform vec3 uSun;
-uniform vec3 uSunDir;
-varying vec3 vDir;
-void main() {
-  vec3 d = normalize(vDir);
-  vec3 col = mix(uGround, uHorizon, smoothstep(-0.25, 0.02, d.y));
-  col = mix(col, uTop, smoothstep(0.02, 0.7, d.y));
-  float s = max(dot(d, uSunDir), 0.0);
-  col += uSun * (pow(s, 48.0) * 6.0 + pow(s, 6.0) * 0.6);
-  gl_FragColor = vec4(col, 1.0);
-}`;
-
 // The last step of the cinematic finish: a soft vignette and fine film grain, applied after tone mapping.
 const FINISH_SHADER = {
   uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uGrain: { value: 0.04 }, uVignette: { value: 0.3 } },
@@ -374,11 +356,11 @@ export function initGallery(items, model, themes = []) {
 
   function updateIntro() {
     if (model.count >= 8 && model.liked.length >= 4) {
-      intro.textContent = `Built from your ${model.count} choices. Each room of this little house holds works that feel alike, its colors and lamplight drawn from them.`;
+      intro.textContent = `Built from your ${model.count} choices. Each galaxy holds works that feel alike, its colors drawn from them.`;
     } else if (model.count >= 8) {
       intro.textContent = `Built from your ${model.count} choices. Save a few more works (♥) and they'll become rooms of their own.`;
     } else {
-      intro.textContent = "A preview. As you choose works in Inspiration, they'll be hung in the rooms of a little house, grouped by how they feel.";
+      intro.textContent = "A preview. As you choose works in Inspiration, they'll gather into galaxies, grouped by how they feel.";
     }
   }
 
@@ -402,7 +384,7 @@ export function initGallery(items, model, themes = []) {
       result.push({
         ...r,
         title: r.theme?.n || "The works you brought",
-        note: `${works.length === 1 ? "One of your works" : `${works.length} of your works that look and read alike`}, grouped by the AI (CLIP)${near ? `. Also close to ${near}` : ""}. ${r.theme?.desc ? `${r.theme.desc[0].toUpperCase()}${r.theme.desc.slice(1)}.` : ""} The room's colors and lamplight come from how these works feel.`,
+        note: `${works.length === 1 ? "One of your works" : `${works.length} of your works that look and read alike`}, grouped by the AI (CLIP)${near ? `. Also close to ${near}` : ""}. ${r.theme?.desc ? `${r.theme.desc[0].toUpperCase()}${r.theme.desc.slice(1)}.` : ""} The galaxy's colors come from how these works feel.`,
         works,
         fromTaste: true,
       });
@@ -878,7 +860,6 @@ export function initGallery(items, model, themes = []) {
   async function start() {
     try {
       THREE = await import("three");
-      const { GLTFLoader } = await import("three/addons/loaders/GLTFLoader.js");
       // The cinematic finish is optional: if these don't load, the gallery renders plainly.
       let post = null;
       try {
@@ -891,7 +872,7 @@ export function initGallery(items, model, themes = []) {
       } catch (error) {
         console.warn("Gallery: post-processing unavailable", error);
       }
-      engine = createEngine(GLTFLoader, post);
+      engine = createEngine(post);
       await loadDials();
     } catch (error) {
       console.warn("Gallery: WebGL unavailable", error);
@@ -928,10 +909,10 @@ export function initGallery(items, model, themes = []) {
     if (pendingEntry != null) { const index = pendingEntry; pendingEntry = null; requestAnimationFrame(() => changeRoom(index, true, true)); }
   }
 
-  // ---------- the cozy home: a few small furnished rooms, lit by lamps, with your works on the walls ----------
-  // Furniture is KayKit "Furniture Bits" by Kay Lousberg (CC0), in assets/kaykit. Scrolling moves the camera
-  // from spot to spot: a view of each room as you enter, then each work in turn, then through the doorway.
-  function createEngine(GLTFLoader, post = null) {
+  // ---------- the voyage: each room is a galaxy, and you glide forward through space from work to work ----------
+  // The camera only ever moves forward. Each work floats straight ahead, glows as you arrive, and dissolves
+  // into light as you pass through it to the next. Between rooms you drift through open space to the next galaxy.
+  function createEngine(post = null) {
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, finePointer ? 1.75 : 1.35));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -939,30 +920,21 @@ export function initGallery(items, model, themes = []) {
     renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x140f0b);
-    scene.fog = new THREE.FogExp2(0x1c140f, 0.02);
-    const camera = new THREE.PerspectiveCamera(50, 1, 0.05, 200);
+    scene.background = new THREE.Color(0x03040a);
+    scene.fog = new THREE.FogExp2(0x03040a, 0.012);
+    const camera = new THREE.PerspectiveCamera(55, 1, 0.05, 900);
     camera.rotation.order = "YXZ";
-    const hemi = new THREE.HemisphereLight(0xffe7cc, 0x5a3b26, 0.9);
-    scene.add(hemi);
-    // A few warm lamp lights follow you through the house, always sitting in the lamps nearest the camera,
-    // so every lamp glows without the cost of lighting them all at once.
-    const lampLights = Array.from({ length: finePointer ? 4 : 3 }, () => {
-      const light = new THREE.PointLight(0xffc58a, 0, 11, 2);
-      scene.add(light);
-      return light;
-    });
 
-    // ----- the cinematic finish: glow on bright lights, depth of field (desktop), grain and vignette -----
+    // ----- the cinematic finish: glow on bright light, depth of field (desktop), grain and vignette -----
     let composer = null, bloom = null, bokeh = null, finish = null, focusDistance = 4;
     if (post) {
       composer = new post.EffectComposer(renderer);
       composer.addPass(new post.RenderPass(scene, camera));
       if (finePointer) {
-        bokeh = new post.BokehPass(scene, camera, { focus: 4, aperture: 0.0016, maxblur: 0.004 });
+        bokeh = new post.BokehPass(scene, camera, { focus: 4, aperture: 0.0012, maxblur: 0.005 });
         composer.addPass(bokeh);
       }
-      bloom = new post.UnrealBloomPass(new THREE.Vector2(256, 256), 0.35, 0.5, 0.9);
+      bloom = new post.UnrealBloomPass(new THREE.Vector2(256, 256), 0.5, 0.6, 0.72);
       composer.addPass(bloom);
       composer.addPass(new post.OutputPass());
       finish = new post.ShaderPass(FINISH_SHADER);
@@ -982,63 +954,54 @@ export function initGallery(items, model, themes = []) {
       else if (renderer.getPixelRatio() > 1) { renderer.setPixelRatio(1); resize(); }
     }
 
-    // ----- a warm indoor environment, so wood and fabric pick up soft reflections and fill light -----
-    {
-      const pmrem = new THREE.PMREMGenerator(renderer);
-      const envScene = new THREE.Scene();
-      envScene.add(new THREE.Mesh(new THREE.SphereGeometry(10, 32, 16), new THREE.ShaderMaterial({
-        uniforms: {
-          uTop: { value: new THREE.Color(0xf3e2c8) }, uHorizon: { value: new THREE.Color(0xc98c5a) }, uGround: { value: new THREE.Color(0x3a2516) },
-          uSun: { value: new THREE.Color(0xffc285).multiplyScalar(0.6) }, uSunDir: { value: new THREE.Vector3(0.3, 0.6, -0.7).normalize() },
-        },
-        side: THREE.BackSide, depthWrite: false,
-        vertexShader: "varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
-        fragmentShader: ENV_FRAGMENT,
-      })));
-      scene.environment = pmrem.fromScene(envScene, 0.04).texture;
-      scene.environmentIntensity = 0.45;
-    }
-
     const glowTexture = canvasTexture(THREE, 128, 128, (ctx, w) => {
       const g = ctx.createRadialGradient(w / 2, w / 2, 0, w / 2, w / 2, w / 2);
       g.addColorStop(0, "rgba(255,255,255,1)");
-      g.addColorStop(0.35, "rgba(255,255,255,.35)");
+      g.addColorStop(0.3, "rgba(255,255,255,.4)");
       g.addColorStop(1, "rgba(255,255,255,0)");
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, w, w);
     });
-    // soft contact shadows under furniture: the cheap trick that makes things sit on the floor
-    const shadowTexture = canvasTexture(THREE, 128, 128, (ctx, w) => {
-      const g = ctx.createRadialGradient(w / 2, w / 2, 0, w / 2, w / 2, w / 2);
-      g.addColorStop(0, "rgba(0,0,0,.75)");
-      g.addColorStop(0.6, "rgba(0,0,0,.35)");
-      g.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, w, w);
-    });
-    const floorTexture = canvasTexture(THREE, 512, 512, (ctx, w, h) => {
-      const rows = 8, rh = h / rows;
-      for (let i = 0; i < rows; i++) {
-        let x = (i % 2) * -120;
-        while (x < w) {
-          const len = 170 + Math.random() * 150, tone = Math.random() * 18;
-          ctx.fillStyle = `rgb(${176 - tone},${112 - tone},${78 - tone * 0.6})`;
-          ctx.fillRect(x, i * rh, len, rh);
-          ctx.fillStyle = "rgba(70,38,20,.35)";
-          ctx.fillRect(x, i * rh, 2, rh);
-          x += len;
-        }
-        ctx.fillStyle = "rgba(70,38,20,.45)";
-        ctx.fillRect(0, i * rh, w, 2);
+    // soft, uneven cloud for nebulae
+    const nebulaTexture = canvasTexture(THREE, 256, 256, (ctx, w) => {
+      for (let i = 0; i < 26; i++) {
+        const x = w / 2 + (Math.random() - 0.5) * w * 0.5, y = w / 2 + (Math.random() - 0.5) * w * 0.5, r = w * (0.12 + Math.random() * 0.28);
+        const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+        g.addColorStop(0, "rgba(255,255,255,.16)");
+        g.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, w, w);
       }
     });
-    floorTexture.wrapS = floorTexture.wrapT = THREE.RepeatWrapping;
+
+    // the deep sky: a far field of stars around the whole voyage, with a few distant galaxies
+    let sky = null;
+    function buildSky(length) {
+      if (sky) { scene.remove(sky); sky.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); }); }
+      sky = new THREE.Group();
+      const count = 9000, pos = new Float32Array(count * 3), col = new Float32Array(count * 3), c = new THREE.Color();
+      for (let i = 0; i < count; i++) {
+        const a = Math.random() * Math.PI * 2, e = Math.acos(Math.random() * 2 - 1), r = 260 + Math.random() * 260;
+        pos.set([Math.cos(a) * Math.sin(e) * r, Math.cos(e) * r * 0.7, -length / 2 + Math.sin(a) * Math.sin(e) * (r + length / 2)], i * 3);
+        c.setHSL(0.55 + Math.random() * 0.2, 0.3, 0.75 + Math.random() * 0.25).toArray(col, i * 3);
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+      sky.add(new THREE.Points(geo, new THREE.PointsMaterial({ size: 1.4, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: 0.85, fog: false, depthWrite: false })));
+      // closer drifting stars give a sense of speed as you travel
+      const near = 2600, npos = new Float32Array(near * 3);
+      for (let i = 0; i < near; i++) npos.set([(Math.random() - 0.5) * 90, (Math.random() - 0.5) * 60, 20 - Math.random() * (length + 60)], i * 3);
+      const ngeo = new THREE.BufferGeometry();
+      ngeo.setAttribute("position", new THREE.BufferAttribute(npos, 3));
+      sky.add(new THREE.Points(ngeo, new THREE.PointsMaterial({ size: 0.07, map: glowTexture, color: 0xcfdcff, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false })));
+      scene.add(sky);
+    }
 
     let world = null;
     let roomEnvs = [];
     let picks = [];
     let animators = [];
-    let lamps = [];
     let path = [];
     let roomDisposables = [];
     let hovered = null;
@@ -1053,211 +1016,72 @@ export function initGallery(items, model, themes = []) {
 
     function track(...things) { roomDisposables.push(...things); return things[0]; }
 
-    // ----- furniture, loaded once and cloned into each room -----
-    const loader = new GLTFLoader();
-    const models = new Map();
-    function loadModel(name) {
-      if (!models.has(name)) {
-        models.set(name, new Promise((resolve) => loader.load(`assets/kaykit/${name}.gltf`, (gltf) => {
-          gltf.scene.traverse((o) => { if (o.isMesh) o.material.roughness = Math.max(o.material.roughness ?? 0.8, 0.72); });
-          resolve(gltf.scene);
-        }, undefined, () => resolve(null))));
+    // A spiral galaxy of glowing stars in the room's colors, lying just below your path so you fly over its arms.
+    function galaxy(group, zc, size, c, seed) {
+      const rand = seeded(seed);
+      const arms = 2 + Math.floor(rand() * 3), twist = 2.4 + rand() * 2.2, count = finePointer ? 7000 : 4000;
+      const pos = new Float32Array(count * 3), col = new Float32Array(count * 3);
+      const core = new THREE.Color(0xfff2dc), armColor = c.glow.clone().lerp(new THREE.Color(0xffffff), 0.15), edge = c.accent.clone().lerp(c.mid, 0.4), tmp = new THREE.Color();
+      for (let i = 0; i < count; i++) {
+        const r = Math.pow(rand(), 0.7) * size;
+        const arm = Math.floor(rand() * arms);
+        const a = (arm / arms) * Math.PI * 2 + (r / size) * twist + (rand() - 0.5) * (0.5 + (1 - r / size) * 0.6);
+        const spread = 0.6 + (r / size) * 2.2;
+        pos.set([Math.cos(a) * r + (rand() - 0.5) * spread, (rand() - 0.5) * (1.2 + (1 - r / size) * 2.4), Math.sin(a) * r + (rand() - 0.5) * spread], i * 3);
+        const k = r / size;
+        tmp.copy(core).lerp(armColor, Math.min(1, k * 2.2)).lerp(edge, Math.max(0, k - 0.55) * 1.6).toArray(col, i * 3);
       }
-      return models.get(name);
-    }
-    function shadow(group, x, z, w, d, strength = 0.4) {
-      const m = new THREE.Mesh(track(new THREE.PlaneGeometry(w, d).rotateX(-Math.PI / 2)), track(new THREE.MeshBasicMaterial({ map: shadowTexture, color: 0x000000, transparent: true, opacity: strength, depthWrite: false })));
-      m.position.set(x, 0.03, z);
-      group.add(m);
-    }
-    async function put(group, name, x, z, ry = 0, { y = 0, s = 1, shade = null } = {}) {
-      const proto = await loadModel(name);
-      if (!proto) return null;
-      const m = proto.clone();
-      m.position.set(x, y, z);
-      m.rotation.y = ry;
-      m.scale.setScalar(s);
-      group.add(m);
-      if (shade && y === 0) shadow(group, x, z, shade[0], shade[1]);
-      return m;
-    }
-
-    // ----- the rooms -----
-    const ROOM_HALF = 4.5, WALL_H = 4.2, DOOR_W = 2.2, DOOR_H = 3.2, WAIN = 1.1;
-    const SLOT_GAP = 3.4, ART_Y = 2.45;
-    function plane(group, w, h, material, x, y, z, ry) {
-      const m = new THREE.Mesh(track(new THREE.PlaneGeometry(w, h)), material);
-      m.position.set(x, y, z);
-      m.rotation.y = ry;
-      group.add(m);
-      return m;
-    }
-    function buildShell(group, zFront, zBack, wallColor, first, last) {
-      const depth = zFront - zBack, zc = (zFront + zBack) / 2, W = 2 * ROOM_HALF;
-      const paint = track(new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.95, envMapIntensity: 0.4 }));
-      const lower = track(new THREE.MeshStandardMaterial({ color: wallColor.clone().multiplyScalar(0.72).lerp(new THREE.Color(0x6b4630), 0.35), roughness: 0.85, envMapIntensity: 0.4 }));
-      const wood = track(new THREE.MeshStandardMaterial({ color: 0x7a4c32, roughness: 0.6 }));
-      const ceilingMat = track(new THREE.MeshStandardMaterial({ color: 0xf1e6d4, roughness: 0.95, emissive: 0x3a2a1c, emissiveIntensity: 0.6, envMapIntensity: 0.2 }));
-      const tex = floorTexture.clone(); tex.needsUpdate = true; tex.repeat.set(W / 3.2, depth / 3.2); track(tex);
-      const floor = new THREE.Mesh(track(new THREE.PlaneGeometry(W, depth).rotateX(-Math.PI / 2)), track(new THREE.MeshStandardMaterial({ map: tex, roughness: 0.55, envMapIntensity: 0.6 })));
-      floor.position.set(0, 0, zc);
-      const ceiling = new THREE.Mesh(track(new THREE.PlaneGeometry(W, depth).rotateX(Math.PI / 2)), ceilingMat);
-      ceiling.position.set(0, WALL_H, zc);
-      group.add(floor, ceiling);
-      // side walls: painted above, a darker panelled band below
-      for (const s of [-1, 1]) {
-        plane(group, depth, WALL_H - WAIN, paint, s * ROOM_HALF, WAIN + (WALL_H - WAIN) / 2, zc, s < 0 ? Math.PI / 2 : -Math.PI / 2);
-        plane(group, depth, WAIN, lower, s * ROOM_HALF, WAIN / 2, zc, s < 0 ? Math.PI / 2 : -Math.PI / 2);
+      const geo = track(new THREE.BufferGeometry());
+      geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+      const disk = new THREE.Points(geo, track(new THREE.PointsMaterial({ size: 0.2, map: glowTexture, vertexColors: true, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false })));
+      const holder = new THREE.Group();
+      holder.add(disk);
+      // a bright core and a haze of nebula clouds in the room's colors
+      const coreGlow = new THREE.Sprite(track(new THREE.SpriteMaterial({ map: glowTexture, color: core.clone().lerp(c.glow, 0.25), transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false })));
+      coreGlow.scale.setScalar(size * 0.28);
+      holder.add(coreGlow);
+      for (let i = 0; i < 9; i++) {
+        const cloud = new THREE.Sprite(track(new THREE.SpriteMaterial({ map: nebulaTexture, color: (i % 2 ? c.glow : c.accent).clone().lerp(c.mid, 0.3), transparent: true, opacity: 0.14, blending: THREE.AdditiveBlending, depthWrite: false })));
+        const a = rand() * Math.PI * 2, r = size * (0.2 + rand() * 0.7);
+        cloud.position.set(Math.cos(a) * r, (rand() - 0.5) * 6, Math.sin(a) * r);
+        cloud.scale.setScalar(size * (0.35 + rand() * 0.4));
+        holder.add(cloud);
       }
-      // end walls: the back wall has a doorway to the next room (unless it's the last room)
-      const endWall = (z, ry, door) => {
-        if (!door) {
-          plane(group, W, WALL_H - WAIN, paint, 0, WAIN + (WALL_H - WAIN) / 2, z, ry);
-          plane(group, W, WAIN, lower, 0, WAIN / 2, z, ry);
-          return;
-        }
-        const sideW = ROOM_HALF - DOOR_W / 2;
-        for (const s of [-1, 1]) {
-          plane(group, sideW, WALL_H - WAIN, paint, s * (DOOR_W / 2 + sideW / 2), WAIN + (WALL_H - WAIN) / 2, z, ry);
-          plane(group, sideW, WAIN, lower, s * (DOOR_W / 2 + sideW / 2), WAIN / 2, z, ry);
-        }
-        plane(group, DOOR_W, WALL_H - DOOR_H, paint, 0, DOOR_H + (WALL_H - DOOR_H) / 2, z, ry);
-      };
-      endWall(zBack, 0, !last);
-      if (first) endWall(zFront, Math.PI, false);
-      // mouldings: baseboards, a chair rail, crown, and a cased doorway
-      const trims = [];
-      for (const s of [-1, 1]) {
-        trims.push({ x: s * (ROOM_HALF - 0.04), y: 0.1, z: zc, sx: 0.08, sy: 0.2, sz: depth });
-        trims.push({ x: s * (ROOM_HALF - 0.04), y: WAIN, z: zc, sx: 0.09, sy: 0.08, sz: depth });
-        trims.push({ x: s * (ROOM_HALF - 0.07), y: WALL_H - 0.1, z: zc, sx: 0.15, sy: 0.2, sz: depth });
-      }
-      for (const z of [zBack + 0.04, first ? zFront - 0.04 : null].filter((v) => v !== null)) {
-        trims.push({ x: 0, y: 0.1, z, sx: W, sy: 0.2, sz: 0.08 }, { x: 0, y: WALL_H - 0.1, z, sx: W, sy: 0.2, sz: 0.15 });
-      }
-      if (!last) {
-        for (const s of [-1, 1]) trims.push({ x: s * (DOOR_W / 2 + 0.08), y: DOOR_H / 2, z: zBack, sx: 0.16, sy: DOOR_H, sz: 0.22 });
-        trims.push({ x: 0, y: DOOR_H + 0.08, z: zBack, sx: DOOR_W + 0.48, sy: 0.16, sz: 0.22 });
-      }
-      const box = track(new THREE.BoxGeometry(1, 1, 1));
-      const mesh = new THREE.InstancedMesh(box, wood, trims.length);
-      const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), sc = new THREE.Vector3();
-      trims.forEach((tr, i) => { p.set(tr.x, tr.y, tr.z); sc.set(tr.sx, tr.sy, tr.sz); m4.compose(p, q, sc); mesh.setMatrixAt(i, m4); });
-      group.add(mesh);
+      // the core sits off to one side and below, so you sail over its arms rather than through its glare
+      holder.position.set((rand() < 0.5 ? -1 : 1) * (size * 0.35), -8, zc);
+      holder.rotation.set(0.32 + rand() * 0.14, 0, (rand() - 0.5) * 0.25); // tilted toward you, so the spiral shows as you approach
+      group.add(holder);
+      const spin = 0.008 + rand() * 0.01;
+      animators.push((t) => { disk.rotation.y = t * spin; });
     }
 
-    // Each room is a different room of the house; the theme shows in its colors, its lamp light and a few props.
-    const ROOM_TYPES = ["living", "study", "bedroom", "nook"];
-    async function furnish(group, type, zFront, zBack, room) {
-      const zc = (zFront + zBack) / 2, back = zBack, front = zFront, H = ROOM_HALF;
-      const theme = room.theme?.n?.toLowerCase() || "";
-      const lampsHere = [];
-      const lamp = (x, y, z) => lampsHere.push(new THREE.Vector3(x, y, z));
-      const rug = ["rug_oval_A", "rug_oval_B", "rug_rectangle_A", "rug_rectangle_B", "rug_rectangle_stripes_A", "rug_rectangle_stripes_B"][Math.abs(hashString(room.title)) % 6];
-      if (type === "living") {
-        await put(group, rug, 0, zc, 0, { s: 1.15 });
-        await put(group, "couch_pillows", -H + 0.95, zc, Math.PI / 2, { shade: [2, 3.4] });
-        await put(group, "table_low", 0.1, zc, Math.PI / 2, { shade: [1.8, 2.6] });
-        await put(group, "armchair", H - 1.1, zc + 0.6, -Math.PI / 2 - 0.3, { shade: [1.9, 1.9] });
-        // lamps stand in the front corners, lighting the room without standing in front of any work
-        await put(group, "lamp_standing", -H + 0.7, front - 0.8, 0, { shade: [1, 1] }); lamp(-H + 0.7, 2.2, front - 0.8);
-        await put(group, "cabinet_small", H - 0.7, front - 0.75, Math.PI, { shade: [1.2, 1.2] });
-        await put(group, "lamp_table", H - 0.7, front - 0.75, 0, { y: 1.0 }); lamp(H - 0.7, 1.75, front - 0.75);
-        await put(group, "book_set", 0.1, zc + 0.3, 0.4, { y: 0.5, s: 0.7 });
-      } else if (type === "study") {
-        await put(group, rug, 0, zc, Math.PI / 2, { s: 1.15 });
-        await put(group, "table_medium_long", 0, zc, Math.PI / 2, { shade: [2.4, 3.4] });
-        await put(group, "chair_A_wood", -1.15, zc - 0.5, Math.PI / 2, { shade: [1, 1] });
-        await put(group, "chair_B_wood", 1.15, zc + 0.5, -Math.PI / 2, { shade: [1, 1] });
-        await put(group, "lamp_table", 0, zc - 0.9, 0, { y: 1.0 }); lamp(0, 1.75, zc - 0.9);
-        await put(group, "book_set", 0.1, zc + 0.6, 1.2, { y: 1.25 });
-        await put(group, "cabinet_medium", -H + 0.6, back + 1.4, Math.PI / 2, { shade: [1.3, 2.3] });
-        await put(group, "lamp_standing", H - 0.7, front - 0.8, 0, { shade: [1, 1] }); lamp(H - 0.7, 2.2, front - 0.8);
-      } else if (type === "bedroom") {
-        await put(group, "bed_double_A", -H + 1.55, zc, Math.PI / 2, { shade: [3.4, 3.4] });
-        await put(group, rug, 0.9, zc, Math.PI / 2, { s: 0.9 });
-        await put(group, "cabinet_small", -H + 0.6, zc - 2.1, Math.PI / 2, { s: 0.8, shade: [1, 1] });
-        await put(group, "lamp_table", -H + 0.6, zc - 2.1, 0, { y: 0.8, s: 0.85 }); lamp(-H + 0.6, 1.5, zc - 2.1);
-        await put(group, "armchair_pillows", H - 1.1, zc + 0.8, -Math.PI / 2, { shade: [1.9, 1.9] });
-        await put(group, "pillow_A", H - 1.2, zc + 0.8, 0.3, { y: 0.62, s: 0.8 });
-        await put(group, "lamp_standing", H - 0.7, front - 0.8, 0, { shade: [1, 1] }); lamp(H - 0.7, 2.2, front - 0.8);
-      } else {
-        await put(group, rug, 0, zc, 0, { s: 1.1 });
-        await put(group, "armchair_pillows", -H + 1.15, zc - 0.4, Math.PI / 2 + 0.25, { shade: [1.9, 1.9] });
-        await put(group, "lamp_standing", -H + 0.7, zc - 1.7, 0, { shade: [1, 1] }); lamp(-H + 0.7, 2.2, zc - 1.7);
-        await put(group, "table_small", -H + 1.2, zc + 1.1, 0, { s: 0.75, shade: [1, 1] });
-        await put(group, "book_single", -H + 1.2, zc + 1.1, 0.5, { y: 0.9, s: 0.8 });
-        await put(group, "cabinet_small_decorated", H - 0.7, front - 0.8, Math.PI, { shade: [1.3, 1.3] });
-        await put(group, "chair_C", H - 1.2, zc, -Math.PI / 2, { shade: [1, 1] });
-      }
-      // a few props that hint at the theme
-      if (/desert|americana|dystopia|surreal/.test(theme)) {
-        await put(group, "cactus_medium_A", 1.75, back + 0.55, 0, { shade: [0.9, 0.9] });
-        await put(group, "cactus_small_B", -1.6, back + 0.4, 0, { shade: [0.6, 0.6] });
-      } else if (/academia|romantic|fairy|gothic|myth|documentary|harlem/.test(theme)) {
-        await put(group, "book_set", 1.75, back + 0.45, 0, { y: 0.25, shade: [0.8, 0.8] });
-        await put(group, "book_set", 1.75, back + 0.45, 0.2, { y: 0.75, s: 0.9 });
-      } else {
-        await put(group, "cactus_small_A", 1.7, back + 0.4, 0, { shade: [0.6, 0.6] });
-      }
-      return lampsHere;
-    }
-
-    // Works hang on the walls in simple wooden frames, glowing softly when you point at them.
+    // Works float straight ahead in a slim glowing frame, and dissolve into light as you pass through them.
     function hangWork(group, entry, texture, c) {
       const { item } = entry;
       const isText = item.kind !== "photo" || !texture;
       const map = isText ? track(textTexture(item)) : texture;
       const aspect = isText ? 0.75 : (texture.image.width / texture.image.height) || 1;
-      const height = 1.45;
-      const width = Math.min(2.1, height * aspect);
+      const height = 2.1;
+      const width = Math.min(3.2, height * aspect);
       const h = width / aspect;
       const holder = new THREE.Group();
-      const frame = new THREE.Mesh(track(new THREE.BoxGeometry(width + 0.16, h + 0.16, 0.08)), track(new THREE.MeshStandardMaterial({ color: 0x4a2f20, roughness: 0.55 })));
-      frame.position.z = -0.04;
-      const art = new THREE.Mesh(track(new THREE.PlaneGeometry(width, h)), track(new THREE.MeshBasicMaterial({ map, toneMapped: false, color: new THREE.Color(1, 1, 1).multiplyScalar(composer ? 1.18 : 1) })));
-      art.position.z = 0.005;
-      const halo = new THREE.Mesh(track(new THREE.PlaneGeometry(width * 2, h * 1.9)), track(new THREE.MeshBasicMaterial({ map: glowTexture, color: new THREE.Color(0xffd9a8).lerp(c.glow, 0.3), transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false })));
-      halo.position.z = -0.1;
+      const frame = new THREE.Mesh(track(new THREE.PlaneGeometry(width + 0.08, h + 0.08)), track(new THREE.MeshBasicMaterial({ color: c.glow.clone().lerp(new THREE.Color(0xffffff), 0.4).multiplyScalar(0.8), transparent: true })));
+      frame.position.z = -0.01;
+      const art = new THREE.Mesh(track(new THREE.PlaneGeometry(width, h)), track(new THREE.MeshBasicMaterial({ map, toneMapped: false, transparent: true })));
+      const halo = new THREE.Mesh(track(new THREE.PlaneGeometry(width * 1.9, h * 1.8)), track(new THREE.MeshBasicMaterial({ map: glowTexture, color: c.glow.clone().lerp(new THREE.Color(0xffffff), 0.3), transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false })));
+      halo.position.z = -0.05;
       holder.add(halo, frame, art);
       holder.position.copy(entry.position);
-      holder.rotation.y = entry.rotationY;
       group.add(holder);
       art.userData.entry = entry;
-      entry.holder = holder;
-      entry.halo = halo;
+      Object.assign(entry, { holder, halo, art, frameMesh: frame, phase: Math.random() * 6.28 });
       picks.push(art);
     }
 
-    // Dust drifting in the lamplight.
-    function dust(group, zFront, zBack) {
-      const count = 180, pos = new Float32Array(count * 3), base = new Float32Array(count * 3);
-      for (let i = 0; i < count; i++) base.set([(Math.random() - 0.5) * 8, 0.3 + Math.random() * 3.6, zBack + Math.random() * (zFront - zBack)], i * 3);
-      pos.set(base);
-      const geo = track(new THREE.BufferGeometry());
-      geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-      const points = new THREE.Points(geo, track(new THREE.PointsMaterial({ size: 0.035, map: glowTexture, color: 0xffe2bd, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false })));
-      group.add(points);
-      animators.push((t) => {
-        if (camera.position.z > zFront + 4 || camera.position.z < zBack - 4) return;
-        for (let i = 0; i < count; i++) {
-          pos[i * 3] = base[i * 3] + Math.sin(t * 0.13 + i) * 0.25;
-          pos[i * 3 + 1] = base[i * 3 + 1] + Math.sin(t * 0.09 + i * 1.7) * 0.2;
-        }
-        geo.attributes.position.needsUpdate = true;
-      });
-    }
-
-    // every piece of furniture the rooms use, fetched together up front (about 1 MB, shared by all rooms)
-    const FURNITURE = [
-      "rug_oval_A", "rug_oval_B", "rug_rectangle_A", "rug_rectangle_B", "rug_rectangle_stripes_A", "rug_rectangle_stripes_B",
-      "couch_pillows", "table_low", "armchair", "armchair_pillows", "lamp_standing", "lamp_table", "cabinet_small", "cabinet_small_decorated",
-      "cabinet_medium", "table_medium_long", "table_small", "chair_A_wood", "chair_B_wood", "chair_C", "bed_double_A", "pillow_A",
-      "book_set", "book_single", "cactus_medium_A", "cactus_small_A", "cactus_small_B",
-    ];
-
+    const GAP = 9; // distance between works along the way
+    const VIEW = 4.2; // how far in front of a work you stop to look at it
     async function buildRooms(roomList) {
-      await Promise.all(FURNITURE.map(loadModel));
       if (world) {
         scene.remove(world);
         roomDisposables.forEach((thing) => thing.dispose?.());
@@ -1265,7 +1089,6 @@ export function initGallery(items, model, themes = []) {
       roomDisposables = [];
       animators = [];
       picks = [];
-      lamps = [];
       hovered = null;
       world = new THREE.Group();
       scene.add(world);
@@ -1275,75 +1098,34 @@ export function initGallery(items, model, themes = []) {
       let z = 0;
       for (const [index, room] of roomList.entries()) {
         const c = paletteFor(room);
-        const D = room.design;
         const group = new THREE.Group();
         world.add(group);
         const n = room.works.length;
-        const far = Math.min(2, n);
-        const sideSlots = Math.ceil((n - far) / 2);
-        const depth = Math.max(9.5, sideSlots * SLOT_GAP + 4.6);
-        const zFront = -z, zBack = zFront - depth;
-        const first = index === 0, last = index === roomList.length - 1;
-        // muted, homely wall colors drawn from the room's own palette
-        const wallColor = new THREE.Color(0xe6d6be).lerp(c.mid, 0.28).lerp(c.light, 0.1);
-        buildShell(group, zFront, zBack, wallColor, first, last);
-        const roomLamps = await furnish(group, ROOM_TYPES[index % ROOM_TYPES.length], zFront, zBack, room);
-        const warmth = D.warmth ?? 0.5;
-        const lampColor = new THREE.Color(0xffb36b).lerp(new THREE.Color(0xffe2c2), 1 - warmth);
-        roomLamps.forEach((position) => {
-          lamps.push({ position, color: lampColor, room: index });
-          const bulb = new THREE.Sprite(track(new THREE.SpriteMaterial({ map: glowTexture, color: lampColor, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false })));
-          bulb.position.copy(position);
-          bulb.scale.setScalar(0.9);
-          group.add(bulb);
-        });
-        dust(group, zFront, zBack);
-
-        // where each work hangs: a zigzag down the side walls, then two on the far wall beside the doorway
-        const slots = [];
-        for (let i = 0; i < sideSlots; i++) {
-          const sz = zFront - 2.7 - i * SLOT_GAP;
-          slots.push({ x: -ROOM_HALF + 0.06, z: sz, ry: Math.PI / 2, nx: 1, nz: 0 });
-          slots.push({ x: ROOM_HALF - 0.06, z: sz, ry: -Math.PI / 2, nx: -1, nz: 0 });
-        }
-        for (const s of [-1, 1].slice(0, far)) slots.push({ x: s * 2.95, z: zBack + 0.06, ry: 0, nx: 0, nz: 1 });
-        // the room's opening view, then each work in turn
-        path.push({ room: index, dwell: 3.2, pos: new THREE.Vector3(0, 2.45, zFront - (first ? 0.7 : -0.6)), look: new THREE.Vector3(0, 1.5, zBack + 1) });
+        const approach = index === 0 ? 10 : 16; // open space before you reach the galaxy's first work
+        const zFirst = -(z + approach + VIEW);
+        const length = approach + VIEW + (n - 1) * GAP + 8;
+        galaxy(group, -(z + length / 2 + 2), Math.max(26, length * 0.6), c, hashString(room.title) + index * 977);
+        // the galaxy comes into view: a stop as you arrive, then each work in turn
+        path.push({ room: index, dwell: 2.6, z: -(z + approach * 0.35) });
         const roomStart = path.length - 1;
         room.works.forEach((item, i) => {
-          const slot = slots[i];
-          if (!slot) return;
-          const position = new THREE.Vector3(slot.x, ART_Y, slot.z);
-          const entry = { item, room: index, position, rotationY: slot.ry, distance: 0 };
+          // a gentle, slow drift in height and side keeps the line alive without swinging you around
+          const position = new THREE.Vector3(Math.sin(i * 1.3 + index) * 0.6, 1.75 + Math.cos(i * 0.9 + index) * 0.25, zFirst - i * GAP);
+          const entry = { item, room: index, position, distance: 0 };
           entries.push(entry);
-          const stand = new THREE.Vector3(slot.x + slot.nx * 3.3, 2.1, slot.z + slot.nz * 3.3);
-          path.push({ room: index, dwell: 2.4, pos: stand, look: position.clone(), entry });
+          path.push({ room: index, dwell: 2.8, z: position.z + VIEW, x: position.x * 0.85, y: position.y + 0.05, entry });
         });
-        if (!last) path.push({ room: index, dwell: 0, pos: new THREE.Vector3(0, 2.15, zBack + 0.6), look: new THREE.Vector3(0, 1.9, zBack - 6) });
         for (const entry of entries.filter((e) => e.room === index)) hangWork(group, entry, await loadTexture(entry.item), c);
-        roomEnvs.push({
-          c, D, roomStart,
-          hemi: 0.5 + (1 - (D.night ?? 0.5)) * 0.45,
-          lamp: 9 + (D.night ?? 0.5) * 9,
-          exposure: 1.0,
-          fog: new THREE.Color(0x1c140f).lerp(c.deep, 0.15),
-          tint: new THREE.Color(0xffe7cc).lerp(c.light, 0.15),
-        });
-        z += depth;
+        roomEnvs.push({ c, roomStart, fog: new THREE.Color(0x03040a).lerp(c.deep, 0.1), bloom: 0.45 + (room.design?.dream ?? 0.5) * 0.2 });
+        z += length;
       }
-      // turn the path into scroll distance: each stop takes a little scrolling, the moves between take more
+      buildSky(z);
+      // scroll distance: each stop takes a little scrolling, the glides between take more
       let unit = 0;
-      path.forEach((stop) => { // each stop's heading as angles, so moves between stops turn smoothly
-        const d = stop.look.clone().sub(stop.pos);
-        stop.yaw = Math.atan2(-d.x, -d.z);
-        stop.pitch = Math.atan2(d.y, Math.hypot(d.x, d.z));
-      });
       path.forEach((stop, i) => {
-        if (i > 0) {
-          const prev = path[i - 1];
-          const turn = prev.look.clone().sub(prev.pos).normalize().angleTo(stop.look.clone().sub(stop.pos).normalize());
-          unit += Math.max(2.4, prev.pos.distanceTo(stop.pos) * 0.75 + turn * 2.2);
-        }
+        stop.x = stop.x ?? 0;
+        stop.y = stop.y ?? 1.8;
+        if (i > 0) unit += Math.max(3, Math.abs(path[i - 1].z - stop.z) * 0.55);
         stop.at = unit;
         unit += stop.dwell;
         if (stop.entry) stop.entry.distance = stop.at + stop.dwell / 2;
@@ -1361,46 +1143,33 @@ export function initGallery(items, model, themes = []) {
       ensureRunning();
     }
 
-    // Where the camera is for a scroll distance: resting at a stop, or easing from one stop to the next.
+    // Where the camera is for a scroll distance: resting at a stop, or gliding forward to the next.
     const tmpPos = new THREE.Vector3();
-    const turn = (a, b, e) => { let d = b - a; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return a + d * e; };
     function pathAt(u) {
       if (!path.length) return null;
-      const rest = (stop) => ({ pos: tmpPos.copy(stop.pos), yaw: stop.yaw, pitch: stop.pitch, stop, room: stop.room, next: stop.room, k: 0 });
-      if (u <= path[0].at) return rest(path[0]);
+      const rest = (stop) => ({ pos: tmpPos.set(stop.x, stop.y, stop.z), stop, room: stop.room, next: stop.room, k: 0 });
+      if (u <= path[0].at) {
+        const first = path[0]; // before the first stop, drift in from a little further back
+        return { pos: tmpPos.set(first.x, first.y, first.z + Math.min(8, (first.at - u) * 1.2)), stop: first, room: first.room, next: first.room, k: 0 };
+      }
       for (let i = 0; i < path.length; i++) {
         const stop = path[i], next = path[i + 1];
         if (u <= stop.at + stop.dwell || !next) return rest(stop);
         if (u < next.at) {
           const t = (u - stop.at - stop.dwell) / (next.at - stop.at - stop.dwell);
           const e = t * t * (3 - 2 * t);
-          return { pos: tmpPos.copy(stop.pos).lerp(next.pos, e), yaw: turn(stop.yaw, next.yaw, e), pitch: stop.pitch + (next.pitch - stop.pitch) * e, stop: e > 0.5 ? next : stop, room: stop.room, next: next.room, k: e };
+          return { pos: tmpPos.set(stop.x + (next.x - stop.x) * e, stop.y + (next.y - stop.y) * e, stop.z + (next.z - stop.z) * e), stop: e > 0.5 ? next : stop, room: stop.room, next: next.room, k: e };
         }
       }
       return rest(path[path.length - 1]);
     }
 
-    const tmpColor = new THREE.Color();
     function applyEnv(at) {
       const a = roomEnvs[at.room], b = roomEnvs[at.next] || a, k = at.room === at.next ? 0 : at.k;
       scene.fog.color.copy(a.fog).lerp(b.fog, k);
-      hemi.color.copy(a.tint).lerp(b.tint, k);
-      hemi.intensity = a.hemi + (b.hemi - a.hemi) * k;
-      renderer.toneMappingExposure = a.exposure + (b.exposure - a.exposure) * k;
+      scene.background.copy(scene.fog.color);
+      if (bloom) bloom.strength = a.bloom + (b.bloom - a.bloom) * k;
       return k > 0.5 ? at.next : at.room;
-    }
-
-    // light the lamps nearest the camera, with a faint candle-like flicker
-    function lightLamps(t, roomIndex) {
-      const env = roomEnvs[roomIndex];
-      const nearest = lamps.map((lamp) => [lamp.position.distanceToSquared(camera.position), lamp]).sort((a, b) => a[0] - b[0]);
-      lampLights.forEach((light, i) => {
-        const lamp = nearest[i]?.[1];
-        if (!lamp) { light.intensity = 0; return; }
-        light.position.copy(lamp.position);
-        light.color.copy(lamp.color);
-        light.intensity = (env?.lamp ?? 12) * (1 + (reducedMotion.matches ? 0 : Math.sin(t * 2.3 + i * 1.7) * 0.03));
-      });
     }
 
     function frame() {
@@ -1412,15 +1181,15 @@ export function initGallery(items, model, themes = []) {
       const t = clock.elapsedTime;
       const p = scrollProgress();
       const target = p * (layout.total + 6) - 6;
-      const ease = reducedMotion.matches ? 1 : 1 - Math.exp(-dt * 2.6);
+      const ease = reducedMotion.matches ? 1 : 1 - Math.exp(-dt * 2.4);
       cam.distance += (target - cam.distance) * ease;
       if (Math.abs(target - cam.distance) > 20) cam.distance = target - Math.sign(target - cam.distance) * 20;
-      const at = pathAt(Math.max(0, cam.distance));
-      look.yaw += (look.tYaw - look.yaw) * 0.06;
-      look.pitch += (look.tPitch - look.pitch) * 0.06;
+      const at = pathAt(cam.distance);
+      look.yaw += (look.tYaw - look.yaw) * 0.05;
+      look.pitch += (look.tPitch - look.pitch) * 0.05;
       camera.position.copy(at.pos);
-      if (!reducedMotion.matches) camera.position.y += Math.sin(t * 0.6) * 0.015;
-      camera.rotation.set(at.pitch + look.pitch * 0.6, at.yaw + look.yaw * 0.5, 0);
+      if (!reducedMotion.matches) { camera.position.y += Math.sin(t * 0.5) * 0.04; camera.position.x += Math.sin(t * 0.37) * 0.03; }
+      camera.rotation.set(-0.02 + look.pitch * 0.6, look.yaw * 0.5, 0);
 
       const index = applyEnv(at);
       roomIndex = index;
@@ -1429,28 +1198,35 @@ export function initGallery(items, model, themes = []) {
         if (rooms[index]) announceRoom(rooms[index], index);
       }
       updateControls(cam.distance, p);
-      lightLamps(t, index);
       if (!reducedMotion.matches) animators.forEach((fn) => fn(t));
 
       raycaster.setFromCamera(pointer, camera);
       const hit = finePointer ? raycaster.intersectObjects(picks, false)[0] : null;
-      const nextHover = hit && hit.distance < 12 ? hit.object.userData.entry : null;
+      const nextHover = hit && hit.distance < 14 ? hit.object.userData.entry : null;
       if (nextHover !== hovered) {
         hovered = nextHover;
         stage.classList.toggle("is-pointing", Boolean(hovered));
       }
-      const focus = hovered || at.stop.entry || null;
+      const current = at.stop.entry || null;
       for (const entry of layout.works) {
         if (!entry.holder) continue;
-        const on = entry === hovered || entry === at.stop.entry;
-        entry.halo.material.opacity += ((entry === hovered ? 0.55 : on ? 0.28 : 0.1) - entry.halo.material.opacity) * 0.1;
-        const s = entry === hovered ? 1.04 : 1;
-        entry.holder.scale.setScalar(entry.holder.scale.x + (s - entry.holder.scale.x) * 0.12);
+        // ahead: visible; close: it glows; passing through: it dissolves into light
+        const ahead = camera.position.z - entry.position.z;
+        const fade = Math.max(0, Math.min(1, (ahead - 0.8) / 2.2));
+        entry.art.material.opacity = fade;
+        entry.frameMesh.material.opacity = fade;
+        entry.holder.visible = ahead > 0.2;
+        const lit = entry === hovered ? 0.45 : entry === current ? 0.28 : 0.1;
+        entry.halo.material.opacity += (lit * (0.4 + 0.6 * fade) + (1 - fade) * 0.35 * (ahead > 0.2 ? 1 : 0) - entry.halo.material.opacity) * 0.15;
+        const s = (entry === hovered ? 1.04 : 1) + (1 - fade) * 0.35;
+        entry.holder.scale.setScalar(entry.holder.scale.x + (s - entry.holder.scale.x) * 0.2);
+        if (!reducedMotion.matches) entry.holder.position.y = entry.position.y + Math.sin(t * 0.6 + entry.phase) * 0.05;
       }
-      setCaption(focus);
+      setCaption(hovered || current);
       if (composer) {
         if (bokeh?.enabled) {
-          const want = focus?.holder ? camera.position.distanceTo(focus.holder.position) : 5;
+          const focus = hovered || current;
+          const want = focus?.holder ? camera.position.distanceTo(focus.holder.position) : VIEW;
           focusDistance += (want - focusDistance) * 0.1;
           bokeh.uniforms.focus.value = focusDistance;
         }
@@ -1472,7 +1248,7 @@ export function initGallery(items, model, themes = []) {
       renderer.setSize(w, h, false);
       if (composer) { composer.setPixelRatio(renderer.getPixelRatio()); composer.setSize(w, h); }
       camera.aspect = w / h;
-      camera.fov = w < 640 ? 64 : 50;
+      camera.fov = w < 640 ? 68 : 55;
       camera.updateProjectionMatrix();
     }
 
@@ -1484,8 +1260,8 @@ export function initGallery(items, model, themes = []) {
       const bounds = stage.getBoundingClientRect();
       pointer.set(((event.clientX - bounds.left) / bounds.width) * 2 - 1, -((event.clientY - bounds.top) / bounds.height) * 2 + 1);
       if (event.pointerType === "mouse" && !reducedMotion.matches) {
-        look.tYaw = -pointer.x * 0.32;
-        look.tPitch = pointer.y * 0.09;
+        look.tYaw = -pointer.x * 0.22;
+        look.tPitch = pointer.y * 0.08;
       }
     });
     stage.addEventListener("pointerleave", () => { pointer.set(9, 9); look.tYaw = 0; look.tPitch = 0; });
@@ -1494,7 +1270,7 @@ export function initGallery(items, model, themes = []) {
       const tap = new THREE.Vector2(((event.clientX - bounds.left) / bounds.width) * 2 - 1, -((event.clientY - bounds.top) / bounds.height) * 2 + 1);
       raycaster.setFromCamera(tap, camera);
       const hit = raycaster.intersectObjects(picks, false)[0];
-      if (hit && hit.distance < 14) showDetails(hit.object.userData.entry.item);
+      if (hit && hit.distance < 16) showDetails(hit.object.userData.entry.item);
     });
 
     function wake() {
