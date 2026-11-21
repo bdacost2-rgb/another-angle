@@ -2,6 +2,8 @@
 
 Inspiration for photographers and writers that learns your taste.
 
+The site has two halves: **Inspiration** is where you *find what you love* (pick, heart, save, steer), and **Uncharted** is where you *go beyond your taste* (galaxies of what you love and what lies just past it, and a map of where it leads). Each page opens with a short welcome on a first visit, reopened any time from "how it works" (`js/welcome.js`).
+
 - **Pick what moves you:** choose public-domain photos and passages, at least 8 in total across as many pages as you like ("Show different ones" keeps your picks, and a tray shows everything picked so far). 8 is a start; the counter encourages more, and "Pick more" in the feed adds to your earlier choices. A **Show me** switch (Photos · Photos + writing · Writing) lets photographers see images on their own, writers see passages on their own, or both as pairs. A taste model (Bayesian logistic regression on CLIP embeddings) learns from your picks.
 - **After your first picks** the feed points to the gallery those picks just built in Uncharted.
 - **Your feed:** each card pairs a photo with a passage that matches its meaning. Hearts and "less like this" keep training the model. Thompson sampling keeps it exploring where it is unsure. Each card says what CLIP thinks the photo and passage share ("Paired by CLIP · both cold · still · wet"), read from twelve CLIP design dials (`js/dials.js`), and **Write** opens the writing coach with that pair and a prompt built from those words.

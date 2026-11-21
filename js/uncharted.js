@@ -8,6 +8,7 @@ import { TasteModel } from "./taste.js";
 import { mergeInto } from "./mine.js";
 import { initGallery, loadDials } from "./uncharted_gallery.js";
 import { getFocus, wireFocusButtons } from "./focus.js";
+import { setupWelcome } from "./welcome.js";
 
 function pcaLayout(items) {
   // Fallback when the data has no t-SNE layout: the two main directions of variation.
@@ -124,6 +125,7 @@ function readLand(items, dials) {
 
 async function main() {
   wireFocusButtons();
+  setupWelcome("uncharted");
   let A;
   try { A = await loadArchive(); } catch (e) { console.error(e); A = null; }
   if (A && A.themes.length) {

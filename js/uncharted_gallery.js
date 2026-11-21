@@ -375,7 +375,7 @@ export function initGallery(items, model, themes = []) {
 
   function updateIntro() {
     if (model.count >= 8 && model.liked.length >= 4) {
-      intro.textContent = `Built from your ${model.count} choices.`;
+      intro.textContent = `What you love, then what lies just past it. Built from your ${model.count} choices.`;
     } else if (model.count >= 8) {
       intro.textContent = `Built from your ${model.count} choices. Save a few more (♥) to fill it.`;
     } else {

@@ -5,6 +5,7 @@ import * as models from "./models.js";
 import { addPhotos, loadPhotos, asItems, mergeInto, clearPhotos } from "./mine.js";
 import { initLens, setWords } from "./lens.js";
 import { loadDials, itemDials, dialWord, strongestWords } from "./dials.js";
+import { setupWelcome } from "./welcome.js";
 
 const $ = (s) => document.querySelector(s);
 const ICON = {
@@ -653,6 +654,7 @@ function renderMsg(m) {
 // ---------- Start ----------
 async function main() {
   initLens();
+  if (location.hash !== "#coach" && location.hash !== "#write") setupWelcome("inspiration");
   document.querySelectorAll("[data-focus]").forEach((b) => b.addEventListener("click", () => { if (T) setFocus(b.dataset.focus); }));
   syncFocus();
   // The writing coach doesn't need the archive, so its tab is wired up first and works either way.
