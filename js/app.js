@@ -596,6 +596,7 @@ function renderMine() {
 // ---------- Coach ----------
 function openCoach(seed = null) {
   show("coach");
+  if (!tourSeen("coach")) setTimeout(() => startTour("coach"), 700); // first time in the coach: a short tour
   const fresh = !coach;
   if (!coach) {
     coach = new Coach({
@@ -738,6 +739,7 @@ async function main() {
     const text = handoff?.text ? T.byId.get(handoff.text) : photo ? T.partnerFor(photo) : null;
     if (T.count < PICKS_NEEDED) renderPicks();
     openCoach({ item: photo, partner: text, words: handoff?.words || [], room: handoff?.room || null });
+    setupWelcome("coach", { pick: () => (!$("#view-coach").hidden ? "coach" : "feed") });
     return;
   }
   if (location.hash === "#coach") { if (T.count < PICKS_NEEDED) renderPicks(); }
@@ -745,7 +747,9 @@ async function main() {
   else { renderPicks(); show("start"); }
   // the guided tour: the picking tour on a first visit, or the feed tour if you arrive with picks already
   const onFeed = () => !$("#view-feed").hidden;
-  if (location.hash !== "#coach") setupWelcome(onFeed() ? "feed" : "inspiration", { pick: () => (onFeed() ? "feed" : "inspiration") });
+  const onCoach = () => !$("#view-coach").hidden;
+  const tourFor = () => (onCoach() ? "coach" : onFeed() ? "feed" : "inspiration");
+  setupWelcome(tourFor(), { pick: tourFor });
 }
 
 // After your first picks, once the "reading your taste" moment has finished, tour the feed's own features.

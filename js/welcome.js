@@ -28,6 +28,15 @@ const TOURS = {
     { sel: "#retrain", title: "Pick more", text: "Add picks any time. The more you pick, the closer it gets." },
     { sel: "#tab-uncharted", title: "When you're ready", text: "Step into Uncharted to see your collection and go beyond it." },
   ],
+  coach: [
+    { title: "Your writing coach.", text: "For when you're stuck. It works out what's in the way and helps you past it, one step at a time." },
+    { sel: "#chat", title: "A short conversation", text: "First a few questions about you and your project. It remembers them next time, so you only do this once." },
+    { sel: "#chat .opts", title: "Tap or type", text: "Tap one of these answers, or write your own in the box below." },
+    { sel: "#chat-form", title: "Say what's in the way", text: "Describe your block in your own words. The AI reads it and works out what kind of block it is, and asks if it's unsure." },
+    { sel: "#chat", title: "What you get", text: "An exercise to try, three ideas to build on, and space to draft. Each session is saved so you can look back." },
+    { sel: "#tab-feed", title: "Or start from a picture", text: "In your feed, tap Write on any pairing and the coach starts you off with a prompt from it instead." },
+    { sel: "[data-welcome]", title: "Replay any time", text: "Open this tour again from \"how it works\"." },
+  ],
   uncharted: [
     { title: "Go beyond your taste.", text: "Inspiration is where you find what you love. Uncharted is where it leads." },
     { sel: "[data-go-gallery='collection']", title: "Your world", text: "Your collection as a solar system: each planet holds a group of works you love. Scroll to travel round it." },
