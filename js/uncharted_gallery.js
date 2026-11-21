@@ -396,15 +396,34 @@ export function initGallery(items, model, themes = []) {
       ? recipeFor(works, availableThemes, taken)
       : { theme: null, neighbors: [], coherence: 0.7 };
 
+    // Each galaxy starts in your taste and travels outward: a few works you hearted at its heart, then new
+    // works you've never seen, each a step further from that heart (picked at widening distances in CLIP
+    // space along the galaxy's own direction). The spiral walk is the expansion.
+    const pool = () => items.filter((item) => fits(item) && !used.has(item.id) && !usedTitles.has(workKey(item)));
+    const STEPS = [[0, "new · just past your taste"], [6, "new · further out"], [24, "new · further out"], [70, "new · far out"]];
     const groups = liked.length >= 2 ? clusterByAesthetic(liked) : liked.length ? [liked] : [];
-    for (const works of groups) {
-      const r = recipe(works);
-      const near = r.neighbors.slice(1).map(({ name }) => name).join(", ");
+    for (const group of groups) {
+      const r = recipe(group);
+      const centroid = centroidOf(group);
+      const anchors = [...group].sort((x, y) => dot(y.vec, centroid) - dot(x.vec, centroid)).slice(0, 3);
+      const reach = new Map(anchors.map((item) => [item.id, "yours"]));
+      const ranked = pool().map((item) => [dot(item.vec, centroid), item]).sort((x, y) => y[0] - x[0]).map(([, item]) => item);
+      const outward = [];
+      for (const [rank, label] of STEPS) {
+        const item = ranked.slice(rank).find((it) => !usedTitles.has(workKey(it)) && !outward.includes(it));
+        if (!item) continue;
+        outward.push(item);
+        reach.set(item.id, label);
+        used.add(item.id);
+        usedTitles.add(workKey(item));
+      }
+      const works = [...anchors, ...outward];
       result.push({
         ...r,
         title: r.theme?.n || "The works you brought", // replaced by a name read from the works (designRooms)
-        note: `${works.length === 1 ? "One of your works" : `${works.length} of your works that look and read alike`}, grouped by the AI (CLIP). Its name comes from what the AI measured in these works.${r.neighbors[0] ? ` Closest curated theme: ${r.neighbors[0].name}${r.neighbors[1] ? `, then ${r.neighbors[1].name}` : ""}.` : ""}`,
+        note: `It begins with ${anchors.length === 1 ? "one work" : `${anchors.length} works`} you love that look and read alike (grouped by the AI, CLIP), then carries you outward through ${outward.length} you've never seen, each a step further from your taste. Its name comes from what the AI measured in them.${r.neighbors[0] ? ` Closest curated theme: ${r.neighbors[0].name}.` : ""}`,
         works,
+        reach,
         fromTaste: true,
       });
     }
@@ -414,12 +433,6 @@ export function initGallery(items, model, themes = []) {
       if (first.length) result.push({ ...recipe(first), title: "A first look", note: "Choose works in Inspiration to make these rooms reflect your taste.", works: first });
     }
 
-    const echoes = uniqueWorks(model.pick(36, { exclude: used }).filter(fits), 4, usedTitles);
-    echoes.forEach((item) => { used.add(item.id); usedTitles.add(workKey(item)); });
-    if (echoes.length) {
-      result.push({ ...recipe(echoes), title: "Where the echoes lead", note: "The Compass finds likely matches, varied so the room doesn't repeat itself.", works: echoes });
-    }
-
     const candidates = items.filter((item) => fits(item) && !used.has(item.id) && !usedTitles.has(workKey(item)));
     const edge = uniqueWorks(diverse(candidates, Math.min(12, candidates.length), (item) => {
       const boundary = 1 - Math.abs(2 * model.prob(item) - 1);
@@ -427,22 +440,9 @@ export function initGallery(items, model, themes = []) {
     }), 4, usedTitles);
     edge.forEach((item) => { used.add(item.id); usedTitles.add(workKey(item)); });
     if (edge.length) {
-      result.push({ ...recipe(edge), title: "At the edge of your taste", note: "These works sit near the model's uncertain boundary. Your reaction helps it learn.", works: edge });
+      result.push({ ...recipe(edge), title: "At the edge of your taste", note: "Works the AI can't place: right on the boundary of what you love. Your ♥ or × here teaches it the most.", works: edge, reach: new Map(edge.map((item) => [item.id, "new · the edge"])) });
     }
 
-    const ringCandidates = [...model.pick(36, { exclude: used }), ...items.filter((item) => !used.has(item.id))].filter(fits);
-    let ring = uniqueWorks(ringCandidates, 8, usedTitles);
-    if (!ring.length) ring = uniqueWorks(items.filter(fits), 8);
-    const lead = result[0];
-    result.push({
-      theme: lead?.theme || null,
-      neighbors: lead?.neighbors || [],
-      coherence: lead?.coherence ?? 0.7,
-      title: "The room your choices opened",
-      note: "A last cluster of new works, gathered from the directions your taste has opened.",
-      works: ring,
-      ring: true,
-    });
     const finished = result.filter((room) => room.works.length);
     designRooms(finished, dialSet || []);
     publishRooms(finished);
@@ -733,7 +733,7 @@ export function initGallery(items, model, themes = []) {
     caption.classList.toggle("is-on", Boolean(entry));
     if (!entry) return;
     caption.querySelector("strong").textContent = titleOf(entry.item);
-    caption.querySelector("small").textContent = [creatorOf(entry.item), entry.item.date?.slice(0, 4), entry.item.source].filter(Boolean).join(" · ");
+    caption.querySelector("small").textContent = [entry.reach, creatorOf(entry.item), entry.item.date?.slice(0, 4)].filter(Boolean).join(" · ");
   }
 
   function renderList() {
@@ -1085,7 +1085,10 @@ export function initGallery(items, model, themes = []) {
       const width = Math.min(3.2, height * aspect);
       const h = width / aspect;
       const holder = new THREE.Group();
-      const frame = new THREE.Mesh(track(new THREE.PlaneGeometry(width + 0.08, h + 0.08)), track(new THREE.MeshBasicMaterial({ color: c.glow.clone().lerp(new THREE.Color(0xffffff), 0.4).multiplyScalar(0.8), transparent: true })));
+      // works you love get a warm gold frame; new ones a cool silver frame, so you can see where your taste ends
+      const yours = entry.reach === "yours";
+      const frameColor = yours ? new THREE.Color(0xf2c27a) : new THREE.Color(0xc9d6f2).lerp(c.glow, 0.15);
+      const frame = new THREE.Mesh(track(new THREE.PlaneGeometry(width + (yours ? 0.12 : 0.08), h + (yours ? 0.12 : 0.08))), track(new THREE.MeshBasicMaterial({ color: frameColor.multiplyScalar(0.85), transparent: true })));
       frame.position.z = -0.01;
       const art = new THREE.Mesh(track(new THREE.PlaneGeometry(width, h)), track(new THREE.MeshBasicMaterial({ map, toneMapped: false, transparent: true })));
       const halo = new THREE.Mesh(track(new THREE.PlaneGeometry(width * 1.9, h * 1.8)), track(new THREE.MeshBasicMaterial({ map: glowTexture, color: c.glow.clone().lerp(new THREE.Color(0xffffff), 0.3), transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false })));
@@ -1135,7 +1138,7 @@ export function initGallery(items, model, themes = []) {
         path[path.length - 1].lookAt = spiralAt(0);
         room.works.forEach((item, i) => {
           const position = spiralAt(i);
-          const entry = { item, room: index, position, distance: 0 };
+          const entry = { item, room: index, position, distance: 0, reach: room.reach?.get(item.id) || "" };
           entries.push(entry);
           path.push({ room: index, dwell: 2.8, z: position.z + VIEW, x: position.x, y: position.y + 0.05, lookAt: position.clone(), entry });
         });

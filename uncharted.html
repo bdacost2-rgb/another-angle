@@ -467,23 +467,19 @@ details.how[open] summary h2::after { content: " −"; }
         <div class="status" id="status">Warm = your taste · fog = unsure</div>
         <div class="hud">
           <div class="stat"><b id="sQ">0</b><span>questions asked</span></div>
-          <div class="stat"><b id="sU">–</b><span>still unsure</span></div>
-          <div class="stat"><b id="sR">0</b><span>new routes</span></div>
         </div>
         <div class="map-cta" id="map-cta"><button class="btn big" id="go-map" type="button">Find new directions →</button></div>
-        <div class="how-to">drag to turn · click a constellation to enter</div>
+        <div class="how-to">drag to turn · click a star to head there · click a constellation to enter a galaxy</div>
         <details class="key">
           <summary>key</summary>
           <div class="legend">
-            <span><i style="background:#c98a55"></i>raised, warm land: your taste</span>
-            <span><i style="background:rgba(228,228,232,.55)"></i>fog: the model is unsure</span>
-            <span><i style="background:var(--accent)"></i>routes being searched</span>
-            <span><i style="background:var(--ink)"></i>you, now</span>
-            <span><i style="background:var(--sea)"></i>uncharted spot (no work exists yet)</span>
-            <span><i style="background:var(--warm)"></i>checkpoint</span>
+            <span><i style="background:#c98a55"></i>warm, raised land: your taste</span>
+            <span><i style="background:rgba(228,228,232,.55)"></i>fog: the AI is unsure</span>
+            <span><i style="background:#b7cbf2"></i>star: a place your taste points to, almost empty (click to head there)</span>
+            <span><i style="background:#ffe5cf"></i>line: the path from your taste to the star you chose</span>
             <span><i style="background:#ffe5cf"></i>constellations: your gallery rooms (click one to walk in)</span>
-            <span><em style="font-family:var(--serif)">italic words</em>: what that area is like, read by CLIP</span>
-            <span>╌ earlier routes · × blocks you worked through</span>
+            <span>hover anywhere: what that area is like, read by CLIP</span>
+            <span>╌ routes you took before</span>
             <span id="kindlegend" hidden><i style="background:#f4f4f4"></i>photo <i style="background:#b7cbf2;margin-left:10px"></i>passage <i style="background:#F2C14E;margin-left:10px"></i>your photos</span>
           </div>
         </details>
