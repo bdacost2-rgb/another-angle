@@ -85,7 +85,6 @@ let mode = { kind: "taste" }; // or {kind:"similar", item} | {kind:"search", q, 
 // 8 picks in total to start, across as many pages as you like ("Show different ones" keeps what you
 // picked). 8 is only a start: the counter keeps encouraging more, up to a well-known taste at 16.
 const PICKS_NEEDED = 8;
-const PICKS_WELL = 16;
 
 // What you're here for: photos, writing, or both side by side. Remembered on this device.
 const FOCUS_KEY = "anotherangle.focus.v1";
@@ -157,8 +156,8 @@ function renderPicks() {
     : spread(sample(photos, 120), 16).concat(spread(sample(texts, 60), 8)).sort(() => Math.random() - 0.5);
   const before = [...T.labels.values()].filter((l) => l.y === 1 && l.w >= 1).length;
   $("#pick-intro").textContent = before
-    ? `Your ${before} earlier choice${before === 1 ? " is" : "s are"} kept (they're in the tray below). Add more that feel like you, then go back to your inspiration. The more you pick, the closer it gets.`
-    : "Pick at least 8 that catch your eye. 8 is a start, and the more you pick, the closer your feed gets. They don't have to be on one page: pick what you like here, then show different ones, and your picks come with you.";
+    ? `Your ${before} earlier pick${before === 1 ? " is" : "s are"} kept. Add more that feel like you.`
+    : "Pick at least 8 that catch your eye. Your picks carry over between pages.";
   const makePick = (it) => {
     const picked = T.labels.get(it.id)?.y === 1;
     let sizeClass = "";
@@ -207,10 +206,8 @@ function updatePickCount() {
   const total = earlier.length + here.length;
   $("#pick-count").textContent = total < PICKS_NEEDED
     ? `${total} of ${PICKS_NEEDED} picked · ${PICKS_NEEDED - total} to go`
-    : total < PICKS_WELL
-      ? `${total} picked · a good start. More picks make it closer to you`
-      : `${total} picked · it knows your taste well`;
-  $("#pick-more").textContent = total ? `Show different ones · keeps your ${total} pick${total === 1 ? "" : "s"}` : "Show different ones";
+    : `${total} picked`;
+  $("#pick-more").textContent = "Show different ones";
   $("#pick-done").disabled = total < PICKS_NEEDED;
   renderTray([...earlier, ...here]);
 }
@@ -417,8 +414,7 @@ function renderMode() {
   m.replaceChildren();
   const clear = el("button", { "aria-label": "Back to your feed", onclick: () => { mode = { kind: "taste" }; resetFeed(); } }, icon("close"));
   if (mode.kind === "taste") {
-    m.append(el("span", {}, T.count ? `For you, learned from ${T.count} choices` : "Exploring"));
-    if (T.count && T.count < PICKS_WELL) m.append(el("button", { class: "nudge", type: "button", onclick: () => $("#retrain").click() }, "Not quite you? Pick more →"));
+    m.append(el("span", {}, T.count ? `For you · ${T.count} choices` : "Exploring"));
     if (steered()) {
       const pushed = DIALS.map((dial, k) => ({ dial, v: steer[k] })).filter(({ v }) => Math.abs(v) >= 4)
         .sort((a, b) => Math.abs(b.v) - Math.abs(a.v)).slice(0, 3).map(({ dial, v }) => dialWord(dial, v));
@@ -701,7 +697,7 @@ async function main() {
     const kept = selectedPicks().length + earlierPicks().length;
     commitPicks(); renderPicks();
     window.scrollTo({ top: 0, behavior: "smooth" });
-    toast(kept ? `Kept your ${kept} pick${kept === 1 ? "" : "s"}. Here are different ones.` : "Here are different ones.");
+    toast(kept ? `Kept your ${kept} pick${kept === 1 ? "" : "s"}.` : "Here are different ones.");
   };
   $("#retrain").onclick = () => { renderPicks(); show("start"); };
   document.querySelectorAll("[data-go]").forEach((a) => a.addEventListener("click", (e) => {

@@ -450,14 +450,14 @@ function tick(){
   requestAnimationFrame(tick);
 }
 async function ask(cell, label = `Checkpoint ${history.length+1}`, statusText = null){
-  $('status').textContent = statusText || `The Compass isn't sure about this area yet (${(Math.min(1,SD[cell]/SD0)*100).toFixed(0)}% unsure). Tell it how these feel.`;
+  $('status').textContent = statusText || `Unsure here (${(Math.min(1,SD[cell]/SD0)*100).toFixed(0)}%). How do these feel?`;
   $('cp').innerHTML = `<div class="tag">${esc(label)}</div><h2 class="thinking">Finding nearby works…</h2>`;
   const nearby = await nearest(cell);
   current = {cell, title: nearby.title};
   $('cp').innerHTML = `<div class="tag">${esc(label)}</div>
     <div class="cpgrid">
-    <div class="cp-nearby"><div class="col-h">Proposed works · mark each one</div>${nearby.html || '<p class="imgline">No archive data loaded yet.</p>'}</div>
-    <div class="cp-feedback"><div class="col-h">How do you feel about this collection?</div>
+    <div class="cp-nearby"><div class="col-h">Nearby works</div>${nearby.html || '<p class="imgline">No archive data loaded yet.</p>'}</div>
+    <div class="cp-feedback"><div class="col-h">This set feels…</div>
     <div class="cp-feedback-actions"><div class="answers">
       <button class="ans" id="a-love" type="button">♥ More like these<kbd>1</kbd></button>
       <button class="ans" id="a-no" type="button">× Not for me<kbd>2</kbd></button>
@@ -496,7 +496,7 @@ document.addEventListener('click', e=>{ const b = e.target.closest('button.v'); 
   const o = {x:w.x, y:w.y, yv:good?1:0, w:1.0}; obs.push(o); journey.obs.push(o); fit(); saveJourney();
   callPy('compass.vote', [kind, id, good]);
   b.parentElement.querySelectorAll('button.v').forEach(q=>{ q.dataset.on = q===b ? '1' : '0'; q.disabled = true; });
-  $('status').textContent = good ? 'Saved. The map warmed around it.' : 'Less like that. That area cools, and it won\'t show again.';
+  $('status').textContent = good ? 'Saved.' : 'Less like that.';
 });
 function showCp(){ flag('checkpoint'); if (pane==='map'){ clearTimeout(paneTimer); paneTimer=setTimeout(()=>go('checkpoint'), REDUCE?0:2200); } }
 function esc(s){ return String(s??'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -513,8 +513,8 @@ function answer(a){
   $('sQ').textContent = history.length;
   fit(); reroutes++; $('sR').textContent = reroutes;
   const from = (a==='love'||a==='closer') ? c : anim.start;   // move forward only when the step felt right
-  $('status').textContent = a==='no' ? 'Dead end. Raising the cost of that area and replanning…' : a==='weirder' ? 'Going stranger: favouring emptier, riskier ground…' : a==='love' ? 'Saved these to your gallery. Moving forward and replanning…' : 'Noted. Moving forward and replanning…';
-  $('cp').innerHTML = `<div class="tag">Checkpoint</div><h2>Replanning…</h2><p class="imgline">The model updated. Watch the land reshape and the routes regrow on the map.</p>`;
+  $('status').textContent = a==='no' ? 'Dead end. Replanning…' : a==='weirder' ? 'Going stranger…' : a==='love' ? 'Saved to your gallery. Replanning…' : 'Replanning…';
+  $('cp').innerHTML = `<div class="tag">Checkpoint</div><h2>Replanning…</h2>`;
   current=null; anim.arrived=false; plan(from); go('map');
 }
 function arrive(s){
@@ -528,8 +528,8 @@ function start(){
   rnd = mulberry(7 + history.length); history=[]; reroutes=0; kappa=1; BETA=.9; anim.arrived=false;
   $('trail').innerHTML=''; $('trailcard').hidden=true; $('trail-empty').hidden=false; $('sQ').textContent='0'; $('sR').textContent='0';
   seedObs(); fit(); busy=true;
-  $('status').textContent='Looking for places your taste points to that nothing in the archive covers yet…';
-  $('cp').innerHTML = `<div class="tag">Checkpoint</div><h2>Searching…</h2><p class="imgline">Three routes are heading toward three empty spots your taste points to. Where the Compass is least sure along the way, it stops and brings you here to ask.</p>`;
+  $('status').textContent='Searching for uncharted places…';
+  $('cp').innerHTML = `<div class="tag">Checkpoint</div><h2>Searching…</h2>`;
   plan(startCell()); $('map-cta').hidden=true; go('map');
 }
 window.addEventListener('compass:gallery-vote', e=>{
@@ -538,7 +538,7 @@ window.addEventListener('compass:gallery-vote', e=>{
   obs=obs.filter(o=>o.itemId!==vote.id);
   obs.push({...vote, itemId:vote.id});
   fit();
-  if (busy){ anim.arrived=false; plan(anim.start ?? startCell()); $('status').textContent='Your gallery choice updated the model. Replanning the routes…'; }
+  if (busy){ anim.arrived=false; plan(anim.start ?? startCell()); $('status').textContent='Replanning…'; }
 });
 document.addEventListener('keydown', e=>{ if (e.target.tagName==='INPUT') return; const m={'1':'love','2':'no','3':'weirder'}[e.key]; if (m && current && pane==='checkpoint') answer(m); });
 $('go').onclick=start; $('go-map').onclick=start;
@@ -547,8 +547,8 @@ $('go').onclick=start; $('go-map').onclick=start;
 obs=[]; fit(); SD0 = Math.max(...SD); seedObs(); fit();
 $('trail-empty').hidden = journey.trail.length>0;
 if (journey.trail.length){ journey.trail.slice(-5).forEach(t=>{ const li=document.createElement('li'); li.innerHTML=`<span>${esc(t.title)}</span><span>${esc(ANSWER_LABEL[t.ans]||t.ans)} · ${esc(t.when||'')}</span>`; $('trail').appendChild(li); }); $('trailcard').hidden=false; }
-if (DATA){ $('kindlegend').hidden=false; if (DATA.trained) $('status').textContent = `Built from your ${DATA.trained} picks. Warm high ground is what you love; fog is where the Compass isn't sure. Press “Find new directions” and it heads for places nothing in the archive covers yet, stopping in the fog to ask you.`; }
-if (journey.obs.length) $('status').textContent = `Welcome back. Your map remembers ${journey.obs.length} answer${journey.obs.length===1?"":"s"} and ${journey.blocks.length} block${journey.blocks.length===1?"":"s"} from ${journey.sessions} session${journey.sessions===1?'':'s'}.`;
+if (DATA){ $('kindlegend').hidden=false; if (DATA.trained) $('status').textContent = `Warm = your taste · fog = unsure`; }
+if (journey.obs.length) $('status').textContent = `Welcome back · ${journey.obs.length} answer${journey.obs.length===1?'':'s'} remembered`;
 go(pane);
 window.addEventListener('resize', resize); if (window.ResizeObserver) new ResizeObserver(()=>{ if (Math.abs(cv.getBoundingClientRect().width-CW)>1) resize(); }).observe(cv); resize(); requestAnimationFrame(tick);
 })();

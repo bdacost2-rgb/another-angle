@@ -327,6 +327,10 @@ details.key .legend { position: absolute; right: 0; bottom: 28px; width: 270px; 
 .cpwide > h2 { font-family: var(--display); font-weight: 500; font-size: clamp(30px, 4vw, 56px); line-height: 1.02; letter-spacing: -.04em; margin: 4px 0 14px; }
 .cpgrid { margin-top: 22px; }
 .pane-log { max-width: 1300px; }
+details.how summary { cursor: pointer; list-style: none; }
+details.how summary::-webkit-details-marker { display: none; }
+details.how summary h2::after { content: " +"; color: var(--muted); }
+details.how[open] summary h2::after { content: " −"; }
 .loggrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: clamp(24px, 5vw, 80px); margin-top: 8px; }
 .loggrid h2 { font-family: var(--display); font-weight: 500; font-size: clamp(28px, 3vw, 44px); letter-spacing: -.04em; line-height: 1.04; margin: 0 0 18px; }
 .how { color: var(--muted); font-weight: 400; } .how b { color: var(--ink); font-weight: 500; }
@@ -391,10 +395,10 @@ details.key .legend { position: absolute; right: 0; bottom: 28px; width: 270px; 
     <section class="pane pane-seed" id="pane-seed" aria-label="Seed your map">
       <div class="tag">00 · start</div>
       <h1>Find the work <em>only you</em> would make.</h1>
-      <p class="lede">Your picks from Inspiration shape a gallery of work to explore. The Compass uses what it knows about your taste to find echoes and surprising connections. The map, checkpoints, and logbook are here when you want to go deeper.</p>
+      <p class="lede">Your Inspiration picks become a gallery and a map to explore.</p>
       <div class="setup">
         <div>
-          <label class="k">themes you're drawn to <span>(tap twice to mark "not me")</span></label>
+          <label class="k">themes you're drawn to</label>
           <div class="chips" id="chips"></div>
         </div>
         <div class="setup-row">
@@ -432,7 +436,7 @@ details.key .legend { position: absolute; right: 0; bottom: 28px; width: 270px; 
           <div class="gallery-opening" id="gallery-opening">
             <div class="tag">01 · your gallery</div>
             <h2>Drift in.</h2>
-            <p id="gallery-intro">Your liked works will be grouped into rooms by how they look and read.</p>
+            <p id="gallery-intro"></p>
             <span class="gallery-label">Scroll to begin</span>
             <div class="gallery-loader" aria-hidden="true"><span id="gallery-load">0</span></div>
           </div>
@@ -459,14 +463,14 @@ details.key .legend { position: absolute; right: 0; bottom: 28px; width: 270px; 
       <div class="mapbox">
         <canvas id="map" aria-label="Three-dimensional taste map with fog, works, your gallery rooms, and planned routes"></canvas>
         <div class="map-tip" id="map-tip" hidden></div>
-        <div class="status" id="status">Warm high ground is what you love; fog is where the Compass isn't sure yet. Press “Find new directions”.</div>
+        <div class="status" id="status">Warm = your taste · fog = unsure</div>
         <div class="hud">
           <div class="stat"><b id="sQ">0</b><span>questions asked</span></div>
           <div class="stat"><b id="sU">–</b><span>still unsure</span></div>
           <div class="stat"><b id="sR">0</b><span>new routes</span></div>
         </div>
         <div class="map-cta" id="map-cta"><button class="btn big" id="go-map" type="button">Find new directions →</button></div>
-        <div class="how-to">drag to turn · move the cursor to clear the fog · click to send a signal · double-click to reset the view</div>
+        <div class="how-to">drag to turn · click a constellation to enter</div>
         <details class="key">
           <summary>key</summary>
           <div class="legend">
@@ -490,7 +494,7 @@ details.key .legend { position: absolute; right: 0; bottom: 28px; width: 270px; 
       <div class="cpwide" id="cp" aria-live="polite">
         <div class="tag">02 · explore · checkpoint</div>
         <h2>Nothing to ask yet</h2>
-        <p class="imgline">When a route runs into fog, the Compass stops, shows what already exists nearby and what could exist there, and asks how you feel about it. Chart your map and it will bring you here.</p>
+        <p class="imgline">The Compass will stop here when it has something to ask you.</p>
         <p style="margin-top:22px"><a class="btn" href="#" data-go-pane="map">Go to the map →</a></p>
       </div>
       <div class="cp-cursor" id="cp-cursor" aria-hidden="true"><span>LOOK</span></div>
@@ -503,11 +507,11 @@ details.key .legend { position: absolute; right: 0; bottom: 28px; width: 270px; 
       <div class="loggrid">
         <div>
           <h2>Your trail</h2>
-          <p class="imgline" id="trail-empty">No answers yet. Each checkpoint you answer is written here.</p>
+          <p class="imgline" id="trail-empty">No answers yet.</p>
           <div id="trailcard" hidden><ul class="trail" id="trail"></ul></div>
         </div>
-        <div class="how">
-          <h2>How it learns</h2>
+        <details class="how">
+          <summary><h2>How it learns</h2></summary>
           <ol>
             <li><b>The gallery.</b> Your selections shape a walk through the archive. CLIP embeddings connect images and passages, while the taste model brings forward likely matches and works it is still unsure about.</li>
             <li><b>Taste with uncertainty.</b> A Bayesian logistic model spans the whole map. It keeps a best guess of what you like <i>and</i> how unsure it is everywhere. The fog you see is that uncertainty; the hills are its best guess.</li>
@@ -517,7 +521,7 @@ details.key .legend { position: absolute; right: 0; bottom: 28px; width: 270px; 
             <li><b>Arrival.</b> When the fog along the route clears, it has found a place and time that never existed, built from your blend of themes. That becomes your assignment, for a photo or for writing.</li>
           </ol>
           <p>Everything here runs in your browser. The map is built from CLIP embeddings of every photo and passage in the archive, and it starts from the picks and hearts you made in Another Angle. Your votes here train the same taste model, so your feed gets better too.</p>
-        </div>
+        </details>
       </div>
     </section>
   </div>

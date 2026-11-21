@@ -368,18 +368,18 @@ export function initGallery(items, model, themes = []) {
 
   function setTip() {
     tip.textContent = finePointer
-      ? "Scroll to walk · move to look · click a work"
+      ? "Scroll · click a work"
       : "Scroll to walk · tap a work";
   }
   setTip();
 
   function updateIntro() {
     if (model.count >= 8 && model.liked.length >= 4) {
-      intro.textContent = `Built from your ${model.count} choices. Each galaxy holds works that feel alike, its colors drawn from them.`;
+      intro.textContent = `Built from your ${model.count} choices.`;
     } else if (model.count >= 8) {
-      intro.textContent = `Built from your ${model.count} choices. Save a few more works (♥) and they'll become rooms of their own.`;
+      intro.textContent = `Built from your ${model.count} choices. Save a few more (♥) to fill it.`;
     } else {
-      intro.textContent = "A preview. As you choose works in Inspiration, they'll gather into galaxies, grouped by how they feel.";
+      intro.textContent = "A preview. Pick works in Inspiration to make it yours.";
     }
   }
 
