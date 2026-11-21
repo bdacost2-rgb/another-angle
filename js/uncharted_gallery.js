@@ -16,7 +16,7 @@ import { fitsFocus } from "./focus.js";
 const $ = (selector) => document.querySelector(selector);
 const UNIT_PX = 64; // scroll pixels per world unit
 const SPACING = 6.2; // world units between works along the path
-const HALL_HALF = 8; // the museum hall is 16 units wide; each room's world lies beyond its windows
+const HALL_HALF = 4; // the house's rooms are 8 units wide; each room's world lies beyond its one window
 const ORBIT_UNITS = 34; // virtual distance used to turn 360 degrees inside the ring room
 
 function node(tag, className, text) {
@@ -1813,83 +1813,161 @@ export function initGallery(items, model, themes = []) {
       return { rain };
     }
 
-    // ----- the museum hall: one cohesive building; each room's theme is what you see through its windows -----
-    const hallFloorTexture = canvasTexture(THREE, 512, 512, (ctx, w, h) => {
-      ctx.fillStyle = "#d8d0c3"; ctx.fillRect(0, 0, w, h);
-      for (let i = 0; i < 2600; i++) { // fine stone grain
-        ctx.fillStyle = `rgba(${90 + Math.random() * 40},${80 + Math.random() * 30},${70 + Math.random() * 20},${Math.random() * 0.05})`;
-        ctx.fillRect(Math.random() * w, Math.random() * h, 2, 2);
-      }
-      ctx.strokeStyle = "rgba(70,60,50,.28)"; ctx.lineWidth = 2;
-      for (let k = 0; k <= 2; k++) { ctx.beginPath(); ctx.moveTo(0, (k * h) / 2); ctx.lineTo(w, (k * h) / 2); ctx.stroke(); }
-      ctx.beginPath(); ctx.moveTo(w / 2, 0); ctx.lineTo(w / 2, h / 2); ctx.moveTo(w / 4, h / 2); ctx.lineTo(w / 4, h); ctx.moveTo((3 * w) / 4, h / 2); ctx.lineTo((3 * w) / 4, h); ctx.stroke();
-    });
-    hallFloorTexture.wrapS = hallFloorTexture.wrapT = THREE.RepeatWrapping;
-
-    function buildHall({ group, z0, len, c, D, first, exit }) {
-      // A glass pavilion: tall windows almost floor to ceiling, separated by slim piers, so the room's world
-      // fills both sides as you walk.
-      const H = HALL_HALF, wallH = 8.2, thick = 0.45, sill = 0.35, winH = 6.7;
-      const zStart = z0 + (first ? 10 : 0), zEnd = z0 - len, L = zStart - zEnd, zc = (zStart + zEnd) / 2;
-      const nBays = Math.max(2, Math.round(L / 6.5)), bay = L / nBays, winW = Math.max(3.4, bay - 1.1);
-      const plaster = track(new THREE.MeshStandardMaterial({ color: new THREE.Color(0xe9e3d8).lerp(c.light, 0.05), roughness: 0.93 }));
-      const trim = track(new THREE.MeshStandardMaterial({ color: 0x2b2520, roughness: 0.45, metalness: 0.25 }));
-      const daylight = c.light.clone().lerp(new THREE.Color(0xfff2dc), 0.35);
-
-      // floor: pale stone that softly reflects the windows
-      const tex = hallFloorTexture.clone(); tex.needsUpdate = true; tex.repeat.set((2 * H) / 4, L / 4); track(tex);
-      const floorMesh = new THREE.Mesh(track(new THREE.PlaneGeometry(2 * H, L).rotateX(-Math.PI / 2)), track(new THREE.MeshStandardMaterial({ map: tex, roughness: 0.3, metalness: 0.05 })));
-      floorMesh.position.set(0, 0.02, zc);
-      group.add(floorMesh);
-
-      // walls: a base below the sills, a band above the windows, and piers between them (all instanced)
-      const boxes = [], trims = [], pools = [], beams = [];
-      for (const s of [-1, 1]) {
-        const x = s * (H + thick / 2);
-        boxes.push({ x, y: sill / 2, z: zc, sx: thick, sy: sill, sz: L });
-        boxes.push({ x, y: sill + winH + (wallH - sill - winH) / 2, z: zc, sx: thick, sy: wallH - sill - winH, sz: L });
-        let prev = zStart;
-        for (let b = 0; b < nBays; b++) {
-          const zb = zStart - (b + 0.5) * bay;
-          const pierLen = prev - (zb + winW / 2);
-          if (pierLen > 0.01) boxes.push({ x, y: sill + winH / 2, z: prev - pierLen / 2, sx: thick, sy: winH, sz: pierLen });
-          prev = zb - winW / 2;
-          // slim dark window frames: a center mullion, a transom, and a surround
-          const ix = s * (H + 0.02);
-          trims.push({ x: ix, y: sill + winH / 2, z: zb, sx: 0.07, sy: winH, sz: 0.07 });
-          trims.push({ x: ix, y: sill + winH * 0.76, z: zb, sx: 0.07, sy: 0.07, sz: winW });
-          trims.push({ x: ix, y: sill, z: zb, sx: 0.12, sy: 0.1, sz: winW + 0.2 }, { x: ix, y: sill + winH, z: zb, sx: 0.12, sy: 0.1, sz: winW + 0.2 });
-          // daylight coming in: a soft pool on the floor and a slanting beam
-          pools.push({ x: s * (H - 2.8), y: 0.035, z: zb, sx: 5, sy: 1, sz: winW * 1.05 });
-          beams.push({ x: s * (H - 1.8), y: 3.6, z: zb, rz: s * 0.55, sx: winW * 0.7, sy: 9, sz: 1 });
+    // ----- the old house: wallpapered rooms, wooden floors, and one window per room you stop to peek out of -----
+    const canvasTex = (w, h, draw) => { const t = canvasTexture(THREE, w, h, draw); t.wrapS = t.wrapT = THREE.RepeatWrapping; return t; };
+    const css = (color) => `#${color.getHexString()}`;
+    const planks = canvasTex(512, 512, (ctx, w, h) => {
+      const rows = 8, rh = h / rows;
+      for (let i = 0; i < rows; i++) {
+        let x = (i % 2) * -90;
+        while (x < w) {
+          const len = 140 + Math.random() * 160, tone = 70 + Math.random() * 30;
+          ctx.fillStyle = `rgb(${tone + 40},${tone + 12},${tone - 18})`;
+          ctx.fillRect(x, i * rh, len, rh);
+          for (let g = 0; g < 14; g++) { // wood grain
+            ctx.strokeStyle = `rgba(40,22,10,${0.05 + Math.random() * 0.08})`; ctx.lineWidth = 1;
+            const gy = i * rh + Math.random() * rh; ctx.beginPath(); ctx.moveTo(x, gy); ctx.bezierCurveTo(x + len * 0.3, gy + 3, x + len * 0.6, gy - 3, x + len, gy); ctx.stroke();
+          }
+          ctx.fillStyle = "rgba(25,14,6,.55)"; ctx.fillRect(x, i * rh, 2, rh);
+          x += len;
         }
-        const pierLen = prev - zEnd;
-        if (pierLen > 0.01) boxes.push({ x, y: sill + winH / 2, z: prev - pierLen / 2, sx: thick, sy: winH, sz: pierLen });
-        trims.push({ x: s * (H - 0.03), y: 0.1, z: zc, sx: 0.06, sy: 0.2, sz: L }); // baseboard
-        trims.push({ x: s * (H - 0.06), y: wallH - 0.15, z: zc, sx: 0.12, sy: 0.3, sz: L }); // cornice
+        ctx.fillStyle = "rgba(25,14,6,.6)"; ctx.fillRect(0, i * rh, w, 2);
       }
-      // ceiling beams over every pier, and a long skylight down the middle
-      for (let b = 0; b <= nBays; b++) trims.push({ x: 0, y: wallH - 0.22, z: zStart - b * bay, sx: 2 * H, sy: 0.4, sz: 0.45 });
-      // doorways: an arched opening between rooms, and a wide one out of the museum at the end
-      const doorway = (z, opening) => {
-        const side = H - opening / 2;
-        for (const s of [-1, 1]) boxes.push({ x: s * (opening / 2 + side / 2), y: wallH / 2, z, sx: side, sy: wallH, sz: thick });
-        boxes.push({ x: 0, y: 6 + (wallH - 6) / 2, z, sx: opening, sy: wallH - 6, sz: thick });
-        trims.push({ x: 0, y: 6, z: z + thick / 2 + 0.02, sx: opening + 0.3, sy: 0.18, sz: 0.06 });
-        for (const s of [-1, 1]) trims.push({ x: s * (opening / 2 + 0.08), y: 3, z: z + thick / 2 + 0.02, sx: 0.16, sy: 6, sz: 0.06 });
-      };
-      if (!first) doorway(z0, 4.6);
-      if (exit) doorway(zEnd, 7);
+    });
+    const panelling = canvasTex(256, 128, (ctx, w, h) => {
+      ctx.fillStyle = "#5b3f2c"; ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = "rgba(255,230,200,.12)"; ctx.lineWidth = 4; ctx.strokeRect(18, 16, w - 36, h - 32);
+      ctx.strokeStyle = "rgba(20,10,4,.45)"; ctx.lineWidth = 3; ctx.strokeRect(24, 22, w - 48, h - 44);
+    });
+    function wallpaper(c, style) {
+      const base = new THREE.Color(0xe9dfcc).lerp(c.mid, 0.28).lerp(c.light, 0.1);
+      const ink = base.clone().multiplyScalar(0.82).lerp(c.deep, 0.12);
+      return canvasTex(256, 256, (ctx, w, h) => {
+        ctx.fillStyle = css(base); ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = css(ink); ctx.strokeStyle = css(ink);
+        if (style === 0) { // stripes
+          for (let x = 0; x < w; x += 64) { ctx.fillRect(x, 0, 22, h); ctx.fillRect(x + 36, 0, 2, h); }
+        } else if (style === 1) { // small flowers on a half-drop
+          for (let y = 0; y < h; y += 64) for (let x = 0; x < w; x += 64) {
+            const ox = x + ((y / 64) % 2) * 32 + 16, oy = y + 20;
+            for (let k = 0; k < 5; k++) { const a = (k / 5) * Math.PI * 2; ctx.beginPath(); ctx.ellipse(ox + Math.cos(a) * 6, oy + Math.sin(a) * 6, 4, 2.6, a, 0, 7); ctx.fill(); }
+            ctx.fillRect(ox - 0.5, oy + 8, 1, 14);
+          }
+        } else if (style === 2) { // trellis
+          ctx.lineWidth = 2;
+          for (let k = -h; k < w; k += 48) { ctx.beginPath(); ctx.moveTo(k, 0); ctx.lineTo(k + h, h); ctx.moveTo(k + h, 0); ctx.lineTo(k, h); ctx.stroke(); }
+          for (let y = 0; y < h; y += 48) for (let x = 0; x < w; x += 48) { ctx.beginPath(); ctx.arc(x, y, 3, 0, 7); ctx.fill(); }
+        } else { // damask-like medallions
+          for (let y = 0; y < h; y += 128) for (let x = 0; x < w; x += 128) {
+            const ox = x + ((y / 128) % 2) * 64 + 64, oy = y + 64;
+            ctx.globalAlpha = 0.8; ctx.beginPath(); ctx.ellipse(ox, oy, 18, 34, 0, 0, 7); ctx.fill();
+            ctx.globalAlpha = 1; ctx.fillStyle = css(base); ctx.beginPath(); ctx.ellipse(ox, oy, 9, 22, 0, 0, 7); ctx.fill(); ctx.fillStyle = css(ink);
+          }
+        }
+      });
+    }
+    function runnerRug(c) {
+      const field = c.deep.clone().lerp(new THREE.Color(0x5a2a22), 0.45), border = c.accent.clone().lerp(new THREE.Color(0xc9a46a), 0.5);
+      return canvasTex(128, 512, (ctx, w, h) => {
+        ctx.fillStyle = css(field); ctx.fillRect(0, 0, w, h);
+        ctx.strokeStyle = css(border); ctx.lineWidth = 6; ctx.strokeRect(8, -10, w - 16, h + 20);
+        ctx.lineWidth = 2; ctx.strokeRect(18, -10, w - 36, h + 20);
+        ctx.fillStyle = css(border);
+        for (let y = 40; y < h; y += 96) { ctx.beginPath(); ctx.moveTo(w / 2, y - 26); ctx.lineTo(w / 2 + 22, y); ctx.lineTo(w / 2, y + 26); ctx.lineTo(w / 2 - 22, y); ctx.closePath(); ctx.fill(); }
+      });
+    }
+    const wallPlane = (group, mat, length, height, x, y, z, s) => {
+      const m = new THREE.Mesh(track(new THREE.PlaneGeometry(length, height)), mat);
+      m.position.set(x, y, z); m.rotation.y = s < 0 ? Math.PI / 2 : -Math.PI / 2;
+      group.add(m);
+    };
 
-      const box = new THREE.BoxGeometry(1, 1, 1);
-      scatter(group, box, plaster, boxes.length, (i) => boxes[i]);
-      scatter(group, box.clone(), trim, trims.length, (i) => trims[i]);
-      // a warm wooden ceiling: the light comes from the windows, not from above
-      const ceiling = new THREE.Mesh(track(new THREE.PlaneGeometry(2 * H, L).rotateX(Math.PI / 2)), track(new THREE.MeshStandardMaterial({ color: 0x5a4636, roughness: 0.75 })));
+    function buildHouse({ group, z0, len, c, D, first, exit, style, windowZ, windowSide }) {
+      const H = HALL_HALF, wallH = 4, wain = 1.05, sill = 1.05, winH = 2.35, winW = 1.9;
+      const zStart = z0 + (first ? 10 : 0), zEnd = z0 - len, L = zStart - zEnd, zc = (zStart + zEnd) / 2;
+      const paper = wallpaper(c, style); track(paper);
+      // the house's own surfaces barely mirror the sky outside, so every room keeps the same homely tones
+      const textured = (tex, rx, ry, opts = {}) => { const t = tex.clone(); t.needsUpdate = true; t.repeat.set(rx, ry); track(t); return track(new THREE.MeshStandardMaterial({ map: t, roughness: 0.9, envMapIntensity: 0.25, ...opts })); };
+      const wood = track(new THREE.MeshStandardMaterial({ color: 0x4a3324, roughness: 0.5 }));
+      // the ceiling catches little direct light, so it carries a faint warmth of its own
+      const cream = track(new THREE.MeshStandardMaterial({ color: 0xece4d4, roughness: 0.95, emissive: 0x6b5a48, emissiveIntensity: 0.55, envMapIntensity: 0.15 }));
+
+      // floorboards and a runner rug down the middle
+      const floor = new THREE.Mesh(track(new THREE.PlaneGeometry(2 * H, L).rotateX(-Math.PI / 2)), textured(planks, (2 * H) / 4, L / 4, { roughness: 0.42 }));
+      floor.position.set(0, 0.02, zc);
+      const rug = new THREE.Mesh(track(new THREE.PlaneGeometry(1.7, L - 1).rotateX(-Math.PI / 2)), textured(runnerRug(c), 1, (L - 1) / 4, { roughness: 1 }));
+      rug.position.set(0, 0.03, zc);
+      group.add(floor, rug);
+
+      // walls: wallpaper above wood wainscoting; one wall has a window cut into it
+      const trims = [];
+      for (const s of [-1, 1]) {
+        const x = s * H;
+        const segments = windowSide === s ? [[zStart, windowZ + winW / 2], [windowZ - winW / 2, zEnd]] : [[zStart, zEnd]];
+        for (const [za, zb] of segments) {
+          const l = za - zb;
+          if (l <= 0.01) continue;
+          wallPlane(group, textured(paper, l / 1.3, (wallH - wain) / 1.3), l, wallH - wain, x, wain + (wallH - wain) / 2, (za + zb) / 2, s);
+          wallPlane(group, textured(panelling, l / 1.5, 1), l, wain, x, wain / 2, (za + zb) / 2, s);
+        }
+        if (windowSide === s) { // the wall around the window: below the sill and above the frame
+          wallPlane(group, textured(panelling, winW / 1.5, 1), winW, wain, x, wain / 2, windowZ, s);
+          const top = sill + winH;
+          wallPlane(group, textured(paper, winW / 1.3, (wallH - top) / 1.3), winW, wallH - top, x, top + (wallH - top) / 2, windowZ, s);
+          // a deep wooden frame with small panes, a sill you could lean on, and curtains pulled aside
+          const ix = s * (H - 0.04);
+          trims.push({ x: s * (H + 0.18), y: sill + winH / 2, z: windowZ + winW / 2 + 0.06, sx: 0.4, sy: winH + 0.2, sz: 0.12 });
+          trims.push({ x: s * (H + 0.18), y: sill + winH / 2, z: windowZ - winW / 2 - 0.06, sx: 0.4, sy: winH + 0.2, sz: 0.12 });
+          trims.push({ x: s * (H + 0.18), y: sill + winH + 0.06, z: windowZ, sx: 0.4, sy: 0.12, sz: winW + 0.24 });
+          trims.push({ x: s * (H - 0.06), y: sill - 0.02, z: windowZ, sx: 0.32, sy: 0.07, sz: winW + 0.5 }); // the sill
+          for (const f of [1 / 3, 2 / 3]) trims.push({ x: ix + s * 0.08, y: sill + winH * f, z: windowZ, sx: 0.04, sy: 0.04, sz: winW });
+          trims.push({ x: ix + s * 0.08, y: sill + winH / 2, z: windowZ, sx: 0.04, sy: winH, sz: 0.04 });
+          const curtainMat = track(new THREE.MeshStandardMaterial({ color: c.accent.clone().lerp(new THREE.Color(0xd8c7a8), 0.55), roughness: 1, side: THREE.DoubleSide }));
+          for (const end of [1, -1]) {
+            const geo = track(new THREE.PlaneGeometry(0.75, winH + 0.6, 12, 1));
+            const pos = geo.attributes.position;
+            for (let i = 0; i < pos.count; i++) pos.setZ(i, Math.sin(pos.getX(i) * 14) * 0.05); // folds
+            geo.computeVertexNormals();
+            const curtain = new THREE.Mesh(geo, curtainMat);
+            curtain.position.set(s * (H - 0.12), sill + winH / 2 + 0.1, windowZ + end * (winW / 2 + 0.2));
+            curtain.rotation.y = s < 0 ? Math.PI / 2 : -Math.PI / 2;
+            group.add(curtain);
+          }
+          // daylight through the panes: a slanting beam and a soft patch on the floor
+          const daylight = c.light.clone().lerp(new THREE.Color(0xfff0d8), 0.4);
+          const pool = new THREE.Mesh(track(new THREE.PlaneGeometry(2.6, winW * 1.2).rotateX(-Math.PI / 2)), track(new THREE.MeshBasicMaterial({ map: glowTexture, color: daylight, transparent: true, opacity: 0.22 + (1 - D.night) * 0.15, blending: THREE.AdditiveBlending, depthWrite: false })));
+          pool.position.set(s * (H - 1.5), 0.04, windowZ);
+          const beam = new THREE.Mesh(track(new THREE.PlaneGeometry(winW * 0.8, 4.2)), track(new THREE.MeshBasicMaterial({ map: shaftTexture, color: daylight, transparent: true, opacity: 0.08 + (1 - D.night) * 0.08, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide })));
+          beam.position.set(s * (H - 1), 1.9, windowZ); beam.rotation.z = s * 0.6;
+          group.add(pool, beam);
+        }
+        // mouldings: baseboard, chair rail, crown
+        trims.push({ x: s * (H - 0.03), y: 0.09, z: zc, sx: 0.06, sy: 0.18, sz: L });
+        trims.push({ x: s * (H - 0.04), y: wain, z: zc, sx: 0.08, sy: 0.07, sz: L });
+        trims.push({ x: s * (H - 0.07), y: wallH - 0.1, z: zc, sx: 0.14, sy: 0.2, sz: L });
+      }
+      // doorways between rooms: a wall across with a cased opening; the last one opens out of the house
+      const doorway = (z, opening, height) => {
+        const sideW = H - opening / 2;
+        for (const s of [-1, 1]) {
+          const m = new THREE.Mesh(track(new THREE.PlaneGeometry(sideW, wallH)), textured(paper, sideW / 1.3, wallH / 1.3, { side: THREE.DoubleSide }));
+          m.position.set(s * (opening / 2 + sideW / 2), wallH / 2, z);
+          group.add(m);
+        }
+        const lintel = new THREE.Mesh(track(new THREE.PlaneGeometry(opening, wallH - height)), textured(paper, opening / 1.3, (wallH - height) / 1.3, { side: THREE.DoubleSide }));
+        lintel.position.set(0, height + (wallH - height) / 2, z);
+        group.add(lintel);
+        for (const s of [-1, 1]) trims.push({ x: s * (opening / 2 + 0.06), y: height / 2, z, sx: 0.14, sy: height, sz: 0.2 });
+        trims.push({ x: 0, y: height + 0.07, z, sx: opening + 0.4, sy: 0.16, sz: 0.2 });
+      };
+      if (!first) doorway(z0, 2.6, 3.1);
+      if (exit) doorway(zEnd, 3.4, 3.3);
+      // exposed wooden beams across the ceiling, the way old houses have them
+      for (let bz = zStart - 1.2; bz > zEnd + 0.5; bz -= 2.4) trims.push({ x: 0, y: wallH - 0.13, z: bz, sx: 2 * H, sy: 0.26, sz: 0.22 });
+      scatter(group, new THREE.BoxGeometry(1, 1, 1), wood, trims.length, (i) => trims[i]);
+      const ceiling = new THREE.Mesh(track(new THREE.PlaneGeometry(2 * H, L).rotateX(Math.PI / 2)), cream);
       ceiling.position.set(0, wallH, zc);
       group.add(ceiling);
-      scatter(group, new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: glowTexture, color: daylight, transparent: true, opacity: 0.16 + (1 - D.night) * 0.12, blending: THREE.AdditiveBlending, depthWrite: false }), pools.length, (i) => pools[i]);
-      scatter(group, new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: shaftTexture, color: daylight, transparent: true, opacity: 0.05 + (1 - D.night) * 0.07, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }), beams.length, (i) => beams[i]);
     }
 
     // ----- the ground: eight kinds, each with its own texture, light and set pieces -----
@@ -2125,7 +2203,7 @@ export function initGallery(items, model, themes = []) {
       const isText = item.kind !== "photo" || !texture;
       const map = isText ? track(textTexture(item)) : texture;
       const aspect = isText ? 0.75 : (texture.image.width / texture.image.height) || 1;
-      const height = entry.ring ? 2.6 : 2.5;
+      const height = entry.ring ? 2.6 : entry.indoor ? 1.85 : 2.5;
       const width = Math.min(4.2, height * aspect);
       const h = width / aspect;
       const holder = new THREE.Group();
@@ -2172,6 +2250,7 @@ export function initGallery(items, model, themes = []) {
       roomEnvs = [];
       const starts = [];
       const entries = [];
+      const windows = [];
       let z = 0;
       let ringCenter = 0;
       for (const [index, room] of roomList.entries()) {
@@ -2187,19 +2266,24 @@ export function initGallery(items, model, themes = []) {
         // every room but the last is inside the museum; the last one is outdoors, on the water
         const indoor = !room.ring;
         const { rain } = generate({ group, r, z0, len, D, c, ring: room.ring, floor, first: index === 0, indoor });
-        if (indoor) buildHall({ group, z0, len, c, D, first: index === 0, exit: !roomList[index + 1] || roomList[index + 1].ring });
+        // one window per room, near its end, alternating sides: the moment you stop and peek out
+        const windowSide = index % 2 ? 1 : -1, windowZ = z0 - (len - 5);
+        if (indoor) {
+          buildHouse({ group, z0, len, c, D, first: index === 0, exit: !roomList[index + 1] || roomList[index + 1].ring, style: index % 4, windowZ, windowSide });
+          windows.push({ distance: -windowZ, side: windowSide });
+        }
         // Bright rooms (snow, marble, clouds, sand, or any daylit room) get less sky light, a little less
         // exposure and glow only on truly bright lights, so they glow instead of glaring. The neon grid glows most.
         const bright = ["snow", "marble", "clouds", "sand"].includes(floor) || D.night < 0.35;
         roomEnvs.push({
-          start: z, len, c, floor, env: makeEnvironment(c, D),
+          start: z, len, c, floor, indoor, env: makeEnvironment(c, D),
           envIntensity: bright ? 0.4 : 0.8,
           bloomStrength: floor === "neon" ? 0.75 : bright ? 0.16 : 0.42,
           bloomThreshold: bright ? 1.05 : 0.85,
           density: ((room.ring ? 0.016 : 0.012) + D.wet * 0.012 + D.storm * 0.006 + (1 - D.scale) * 0.005
             + clamp01((0.85 - room.coherence) / 0.35) * 0.012)
             * ({ water: 1, sand: 0.7, meadow: 0.85, marble: 0.6, snow: 0.55, neon: 0.65, clouds: 0.8, forest: 1.1 }[floor] ?? 1)
-            * (indoor ? 0.7 : 1),
+            * (indoor ? 0.35 : 1),
           ripple: 0.22 + D.storm * 0.9 + D.wet * 0.25 + rain * 0.4,
           exposure: (floor === "neon" ? 0.95 : floor === "snow" ? 0.9 : bright ? 0.95 : 1.05) - D.night * 0.2,
           hemi: 0.85 + (1 - D.night) * 0.85,
@@ -2241,8 +2325,8 @@ export function initGallery(items, model, themes = []) {
           room.works.forEach((item, i) => {
             const sideSign = i % 2 === 0 ? -1 : 1;
             const distance = z + 10 + i * SPACING;
-            const position = new THREE.Vector3(sideSign * 3.1, 1.95, -distance);
-            entries.push({ item, room: index, ring: false, orbit: 0, distance, position, rotationY: -sideSign * 0.42 });
+            const position = new THREE.Vector3(sideSign * 2.3, 1.85, -distance);
+            entries.push({ item, room: index, ring: false, orbit: 0, distance, position, rotationY: -sideSign * 0.34, indoor: true });
           });
         }
         for (const entry of entries.filter((e) => e.room === index)) {
@@ -2251,7 +2335,7 @@ export function initGallery(items, model, themes = []) {
         }
         z += len;
       }
-      layout = { starts, ringCenter, total: ringCenter + (reducedMotion.matches ? 0 : ORBIT_UNITS), works: entries };
+      layout = { windows, starts, ringCenter, total: ringCenter + (reducedMotion.matches ? 0 : ORBIT_UNITS), works: entries };
       journey.style.height = `calc(${Math.round((layout.total + 6) * UNIT_PX)}px + 100dvh)`;
       upgradeMaterials(world);
       makeWater(z + 40);
@@ -2276,7 +2360,8 @@ export function initGallery(items, model, themes = []) {
       return { a, b: nextEnv || a, k, index: k > 0.5 && nextEnv ? i + 1 : i };
     }
 
-    const tmpA = new THREE.Color(), tmpB = new THREE.Color();
+    const tmpA = new THREE.Color(), tmpB = new THREE.Color(), warmIndoor = new THREE.Color(0xffe3c4);
+    const warmFloor = new THREE.Color(0x6b4a33), indoorAir = new THREE.Color(0x3a3029);
     function applyEnv(distance) {
       if (!roomEnvs.length) return 0;
       const { a, b, k, index } = envAt(distance);
@@ -2286,6 +2371,14 @@ export function initGallery(items, model, themes = []) {
       skyUniforms.uHorizon.value.copy(scene.fog.color);
       skyUniforms.uTop.value.copy(mix("top"));
       hemi.color.copy(mix("light"));
+      // inside the house the light is warm and homely whatever the weather outside
+      const inside = (a.indoor ? 1 - k : 0) + (b.indoor ? k : 0);
+      if (inside > 0) {
+        hemi.color.lerp(warmIndoor, 0.85 * inside);
+        hemi.groundColor.lerp(warmFloor, 0.9 * inside);
+        scene.fog.color.lerp(indoorAir, 0.8 * inside); // the house's air, not the weather's
+        skyUniforms.uHorizon.value.copy(scene.fog.color);
+      }
       hemi.groundColor.copy(mix("deep"));
       sun.color.copy(mix("light")).lerp(mix("glow"), 0.3);
       renderer.toneMappingExposure = a.exposure + (b.exposure - a.exposure) * k;
@@ -2330,9 +2423,20 @@ export function initGallery(items, model, themes = []) {
       const orbit = layout.total > layout.ringCenter ? Math.max(0, (cam.distance - layout.ringCenter) / (layout.total - layout.ringCenter)) : 0;
       look.yaw += (look.tYaw - look.yaw) * 0.06;
       look.pitch += (look.tPitch - look.pitch) * 0.06;
-      const meander = Math.sin(walk * 0.06) * 0.5 * Math.max(0, Math.min(1, (layout.ringCenter - walk) / 10));
-      camera.position.set(meander, 1.75 + (reducedMotion.matches ? 0 : Math.sin(t * 0.6) * 0.03), -walk);
-      camera.rotation.set(look.pitch, look.yaw - orbit * Math.PI * 2 + meander * 0.05, 0);
+      const meander = Math.sin(walk * 0.06) * 0.35 * Math.max(0, Math.min(1, (layout.ringCenter - walk) / 10));
+      // The peek: walking up to a room's window, you turn to it and lean in so the world outside fills the
+      // view, then turn back and carry on. It follows your scrolling, so you can linger at the glass.
+      let peek = 0, peekSide = 0;
+      for (const w of layout.windows || []) {
+        const u = (walk - (w.distance - 7)) / 12;
+        if (u <= 0 || u >= 1) continue;
+        const bump = Math.sin(u * Math.PI);
+        const e = bump * bump * (3 - 2 * bump);
+        if (e > peek) { peek = e; peekSide = w.side; }
+      }
+      if (reducedMotion.matches) peek *= 0.6;
+      camera.position.set(meander * (1 - peek) + peekSide * 2.1 * peek, 1.75 + (reducedMotion.matches ? 0 : Math.sin(t * 0.6) * 0.03) + 0.05 * peek, -walk);
+      camera.rotation.set(look.pitch - 0.04 * peek, look.yaw - orbit * Math.PI * 2 + meander * 0.05 - peekSide * 1.35 * peek, 0);
       sky.position.copy(camera.position);
 
       const index = applyEnv(walk);
