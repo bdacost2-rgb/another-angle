@@ -24,16 +24,20 @@ function mulberry(a){return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1
 function gauss(r){let u=0,v=0;while(!u)u=r();while(!v)v=r();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v)}
 const WORKS = DATA ? DATA.works : [];
 if (!DATA) THEMES.forEach((t,ti)=>{for(let i=0;i<20;i++){const x=t.x+gauss(rnd)*.045, y=t.y+gauss(rnd)*.045; if(x>.01&&x<.99&&y>.01&&y<.99) WORKS.push({x,y,ti});}});
-// density of existing works on the grid
-const DENS = new Float32Array(W*H);
-for (let j=0;j<H;j++) for (let i=0;i<W;i++){ const x=(i+.5)/W, y=(j+.5)/H; let d=0;
-  for (const w of WORKS){ const dx=x-w.x, dy=(y-w.y)*.625; d+=Math.exp(-(dx*dx+dy*dy)/(2*.035*.035)); } DENS[j*W+i]=d; }
-const DMAX = Math.max(...DENS); for (let k=0;k<DENS.length;k++) DENS[k]/=DMAX;
-// wide density: "inside the world" (gaps between clusters count, the empty margins of the map don't)
-const DWIDE = new Float32Array(W*H);
-for (let j=0;j<H;j++) for (let i=0;i<W;i++){ const x=(i+.5)/W, y=(j+.5)/H; let d=0;
-  for (const w of WORKS){ const dx=x-w.x, dy=(y-w.y)*.625; d+=Math.exp(-(dx*dx+dy*dy)/(2*.11*.11)); } DWIDE[j*W+i]=d; }
-const DWMAX = Math.max(...DWIDE); for (let k=0;k<DWIDE.length;k++) DWIDE[k]/=DWMAX;
+// Which works the map shows: photos, writing or both (the same "show me" switch as everywhere else).
+const focusNow = () => { try { const f=localStorage.getItem('anotherangle.focus.v1'); return f==='photo'||f==='text'?f:'both'; } catch(e){ return 'both'; } };
+const fitsFocus = w => { const f=focusNow(); return f==='both' || (f==='photo' ? !w.kind : !!w.kind); };
+// density of existing works on the grid (only the kind you're looking at, so the stars point to places with none of it)
+const DENS = new Float32Array(W*H), DWIDE = new Float32Array(W*H);
+function computeDensity(){
+  const shown = WORKS.filter(fitsFocus);
+  for (let j=0;j<H;j++) for (let i=0;i<W;i++){ const x=(i+.5)/W, y=(j+.5)/H; let d=0, dw=0;
+    for (const w of shown){ const dx=x-w.x, dy=(y-w.y)*.625, r2=dx*dx+dy*dy; d+=Math.exp(-r2/(2*.035*.035)); dw+=Math.exp(-r2/(2*.11*.11)); }
+    DENS[j*W+i]=d; DWIDE[j*W+i]=dw; }
+  const m=Math.max(...DENS)||1, mw=Math.max(...DWIDE)||1;
+  for (let k=0;k<DENS.length;k++){ DENS[k]/=m; DWIDE[k]/=mw; }
+}
+computeDensity();
 
 // ---------- Bayesian logistic regression on RBF features (Laplace approximation) ----------
 const CX=10, CY=7, D=CX*CY+1, WIDTH=.12;
@@ -150,8 +154,8 @@ const PX=new Float32Array(N), PY=new Float32Array(N), PK=new Float32Array(N), LI
 function terrainTargets(){ for (let c=0;c<N;c++){ const like=sig(MU[c]), fog=Math.min(1,SD[c]/SD0);
     HTt[c]=(like-.5)*.34*(1-.45*fog); FGt[c]=fog; HEt[c]=Math.max(0,like-.45)/.55*(1-.7*fog); } fieldDirty=false; }
 const HOME={yaw:-.42, tilt:.98};
-const cam={yaw:HOME.yaw, tilt:HOME.tilt, vyaw:0, cy:1, sy:0, ct:1, st:0, S:1};
-function project(u,v,h){ const X=(u-.5)*ASPECT, Z=v-.5, x=X*cam.cy-Z*cam.sy, z=X*cam.sy+Z*cam.cy;
+const cam={yaw:HOME.yaw, tilt:HOME.tilt, vyaw:0, cy:1, sy:0, ct:1, st:0, S:1, fu:.5, fv:.5, zoom:1, tfu:.5, tfv:.5, tzoom:1};
+function project(u,v,h){ const X=(u-cam.fu)*ASPECT, Z=v-cam.fv, x=X*cam.cy-Z*cam.sy, z=X*cam.sy+Z*cam.cy;
   const y=z*cam.ct-h*cam.st, depth=z*cam.st+h*cam.ct, k=1/(1-depth*.42);
   return [CW/2+x*k*cam.S, CH*.5+y*k*cam.S, k]; }
 function hAt(u,v){ const fx=Math.min(W-1,Math.max(0,u*W-.5)), fy=Math.min(H-1,Math.max(0,v*H-.5)), i=Math.min(W-2,fx|0), j=Math.min(H-2,fy|0), a=fx-i, b=fy-j, c=j*W+i;
@@ -171,13 +175,14 @@ cv.addEventListener('pointermove', e=>{ const dx=e.clientX-ptr.sx, dy=e.clientY-
     if (ptr.drag){ cam.yaw+=dx*.006; cam.vyaw=dx*.006; cam.tilt=Math.min(1.3,Math.max(.12,cam.tilt+dy*.004)); ptr.sx=e.clientX; ptr.sy=e.clientY; cv.classList.add('turning'); } } });
 function ptrUp(e){
   if (ptr.down && !ptr.drag && hoverStar>=0){ ptr.down=false; chooseTarget(hoverStar); return; }
+  if (ptr.down && !ptr.drag && hoverNode!=null){ ptr.down=false; branchFrom(hoverNode); return; } // go back to an earlier point and branch from there
   const room = ptr.down && !ptr.drag ? roomAt(ptr.x, ptr.y) : null;
   if (room){ ptr.down=false; ptr.on=false; cv.classList.remove('turning'); enterRoom(room.index); return; }
   if (ptr.down && !ptr.drag && ptr.pick>=0){ const [u,v]=cellUV(ptr.pick); ripples.push({u,v,t:performance.now()}); if (ripples.length>6) ripples.shift(); }
   ptr.down=false; ptr.drag=false; cv.classList.remove('turning'); if (e.pointerType==='touch') ptr.on=false; }
 cv.addEventListener('pointerup', ptrUp); cv.addEventListener('pointercancel', ptrUp);
 cv.addEventListener('pointerleave', ()=>{ if (!ptr.down) ptr.on=false; });
-cv.addEventListener('dblclick', ()=>{ cam.yaw=HOME.yaw; cam.tilt=HOME.tilt; cam.vyaw=0; });
+cv.addEventListener('dblclick', ()=>{ cam.yaw=HOME.yaw; cam.tilt=HOME.tilt; cam.vyaw=0; cam.tfu=cam.tfv=.5; cam.tzoom=1; });
 const SANS="'Google Sans Flex', 'Helvetica Neue', Arial, sans-serif";
 const SERIF="Newsreader, Georgia, serif";
 
@@ -190,7 +195,7 @@ function mst(points){ const n=points.length, inTree=new Uint8Array(n), best=new 
     for (let v=0; v<n; v++){ if (inTree[v]) continue; const d=Math.hypot((points[u][0]-points[v][0])*ASPECT, points[u][1]-points[v][1]); if (d<best[v]){ best[v]=d; from[v]=u; } } }
   return edges; }
 function segDist(px,py,a,b){ const dx=b[0]-a[0], dy=b[1]-a[1], L=dx*dx+dy*dy||1, t=Math.max(0,Math.min(1,((px-a[0])*dx+(py-a[1])*dy)/L)); return Math.hypot(px-a[0]-t*dx, py-a[1]-t*dy); }
-let hoverRoom=null, hoverStar=-1;
+let hoverRoom=null, hoverStar=-1, hoverNode=null;
 function roomAt(x,y){ let best=null, bd=14;
   for (const room of (window.GALLERY_ROOMS||[])){ if (!room.screen) continue;
     room.screen.forEach(p=>{ const d=Math.hypot(p[0]-x,p[1]-y); if (d<bd){ bd=d; best=room; } });
@@ -227,7 +232,8 @@ function draw(){
   if (fieldDirty) terrainTargets();
   // camera: glide after a drag, and drift very slowly when nobody is touching it
   if (!ptr.down){ cam.yaw+=cam.vyaw; cam.vyaw*=.93; if (!ptr.on && !REDUCE) cam.yaw+=.0007; }
-  cam.cy=Math.cos(cam.yaw); cam.sy=Math.sin(cam.yaw); cam.ct=Math.cos(cam.tilt); cam.st=Math.sin(cam.tilt); cam.S=Math.min(CW*.5, CH*.92);
+  cam.cy=Math.cos(cam.yaw); cam.sy=Math.sin(cam.yaw); cam.ct=Math.cos(cam.tilt); cam.st=Math.sin(cam.tilt); cam.S=Math.min(CW*.5, CH*.92)*cam.zoom;
+  const fe=REDUCE?1:.045; cam.fu+=(cam.tfu-cam.fu)*fe; cam.fv+=(cam.tfv-cam.fv)*fe; cam.zoom+=(cam.tzoom-cam.zoom)*fe; // flying to a chosen star
   ctx.clearRect(0,0,CW,CH);
   const bg=ctx.createRadialGradient(CW/2,CH*.5,0,CW/2,CH*.5,Math.max(CW,CH)*.65); bg.addColorStop(0,'#1b1b1f'); bg.addColorStop(1,'#121214'); ctx.fillStyle=bg; ctx.fillRect(0,0,CW,CH);
   ripples=ripples.filter(rp=>now-rp.t<2600);
@@ -252,7 +258,7 @@ function draw(){
     ctx.fillStyle=`rgba(${150+105*he|0},${150+48*he|0},${165-70*he|0},${Math.min(1,.2+he*.7+l*.5)})`; ctx.fillRect(PX[c]-s/2,PY[c]-s/2,s,s); }
   // works
   let near=null, nd=1e9; const links=[];
-  for (const w of WORKS){ const p=onLand(w.x,w.y,.012); let x=p[0], y=p[1], boost=0, tx=0, ty=0;
+  for (const w of WORKS){ if (!fitsFocus(w)) continue; const p=onLand(w.x,w.y,.012); let x=p[0], y=p[1], boost=0, tx=0, ty=0;
     if (!REDUCE){ x+=Math.cos(now/1700+w.ph)*.7; y+=Math.sin(now/2100+w.ph*1.7)*.7; }
     if (ptr.a>.01){ const dx=x-ptr.lx, dy=y-ptr.ly, d=Math.hypot(dx,dy);
       if (d<R){ const k=1-d/R; boost=k*ptr.a; const q=k*k*10*ptr.a/(d||1); tx=dx*q; ty=dy*q; if (d<nd){ nd=d; near=w; } if (d<R*.6) links.push([w,d]); } }
@@ -297,30 +303,36 @@ function draw(){
     ctx.strokeStyle=`rgba(255,229,207,${a*.5})`; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(g[0],g[1]); ctx.lineTo(top[0],top[1]); ctx.stroke();
     ctx.fillStyle=`rgba(255,229,207,${on?1:.85})`; ctx.fillText(label, top[0], top[1]-5); placed.push([top[0],top[1],tw]); }
   ctx.font=`500 ${fs}px ${SANS}`;
-  // your earlier routes and the blocks you worked through
-  ctx.setLineDash([2,4]); ctx.lineWidth=1.2; ctx.strokeStyle='rgba(183,203,242,.5)';
-  journey.paths.forEach(pth=>{ ctx.beginPath(); pth.forEach(([x,y],k)=>{ const p=onLand(x,y,.006); k?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]); }); ctx.stroke(); });
-  ctx.setLineDash([]);
-  journey.blocks.forEach(b=>{ const [x,y]=onLand(b.x,b.y,.01); ctx.strokeStyle = b.helped ? '#b7cbf2' : '#9a9a9d'; ctx.lineWidth=1.6;
-    ctx.beginPath(); ctx.moveTo(x-4,y-4); ctx.lineTo(x+4,y+4); ctx.moveTo(x+4,y-4); ctx.lineTo(x-4,y+4); ctx.stroke();
-    ctx.fillStyle='rgba(244,244,244,.7)'; ctx.font=`500 ${Math.max(9,fs-2)}px ${SANS}`; ctx.fillText(b.block, x, y-8); });
-  // the one route you asked for: from your taste toward the star you chose, drawn as it grows
-  if (anim.route){ const pth=anim.route.path, prog=REDUCE?1:Math.min(1,(now-anim.route.t)/1400), m=Math.max(2,Math.floor(pth.length*prog));
-    ctx.strokeStyle='#ffe5cf'; ctx.lineWidth=2.4; ctx.setLineDash([]); ctx.beginPath();
-    pth.slice(0,m).forEach((c,k)=>{ k?ctx.lineTo(PX[c],PY[c]):ctx.moveTo(PX[c],PY[c]); }); ctx.stroke(); }
-  // uncharted stars: places your taste points to where almost nothing exists yet. Click one to head there.
-  const beacon=(c,col,hgt)=>{ const [u,v]=cellUV(c), top=project(u,v,VH[c]+hgt), g=ctx.createLinearGradient(PX[c],PY[c],top[0],top[1]); g.addColorStop(0,col); g.addColorStop(1,'rgba(0,0,0,0)');
-    ctx.strokeStyle=g; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(PX[c],PY[c]); ctx.lineTo(top[0],top[1]); ctx.stroke(); return top; };
-  hoverStar = -1;
-  anim.tg.forEach((t,ti)=>{ const c=t.c, x=PX[c], y=PY[c], sel=anim.sel===ti, near=ptr.a>.01 && Math.hypot(ptr.x-x,ptr.y-y)<22;
+  // ----- your journey: a tree that starts at your taste. Each branch you took is drawn solid; from where you
+  // are now, three new directions are offered (dashed). Picking one takes you into Beyond, toward it.
+  const nodePos = (n) => n<0 ? cellUV(anim.start ?? 0) : [journey.nodes[n].u, journey.nodes[n].v];
+  const screenOf = (u,v,lift=.02) => onLand(u,v,lift);
+  hoverStar=-1; hoverNode=null;
+  const curr = journey.cur ?? -1;
+  // branches you've taken
+  journey.nodes.forEach((nd,k)=>{ const [pu,pv]=nodePos(nd.parent), a=screenOf(pu,pv), b=screenOf(nd.u,nd.v);
+    ctx.strokeStyle='rgba(255,229,207,.85)'; ctx.lineWidth=2.2; ctx.setLineDash([]); ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.stroke(); });
+  journey.nodes.forEach((nd,k)=>{ const p=screenOf(nd.u,nd.v), near=ptr.a>.01 && Math.hypot(ptr.x-p[0],ptr.y-p[1])<14, on=k===curr;
+    if (near) hoverNode=k;
+    ctx.fillStyle=on?'#ffe5cf':'rgba(255,229,207,.8)'; ctx.beginPath(); ctx.arc(p[0],p[1],on?6:near?5:4,0,7); ctx.fill();
+    ctx.font=`italic 400 ${Math.max(10,fs-1)}px ${SERIF}`; ctx.fillStyle=`rgba(255,229,207,${on||near?1:.7})`; ctx.fillText(nd.label, p[0], p[1]-10); });
+  // the three directions from where you are
+  const [cu,cv]=nodePos(curr), from=screenOf(cu,cv);
+  anim.tg.forEach((t,ti)=>{ const [u,v]=cellUV(t.c), p=screenOf(u,v,.03), near=ptr.a>.01 && Math.hypot(ptr.x-p[0],ptr.y-p[1])<24;
     if (near) hoverStar=ti;
-    const top=beacon(c, sel?'rgba(255,229,207,1)':'rgba(183,203,242,.9)', .22), pulse=6+2*Math.sin(now/300+ti);
-    ctx.strokeStyle=sel?'#ffe5cf':'#b7cbf2'; ctx.lineWidth=near||sel?2:1.4; ctx.beginPath(); ctx.ellipse(x,y,pulse+4,(pulse+4)*Math.max(.25,cam.ct),0,0,7); ctx.stroke();
-    ctx.fillStyle=sel?'#ffe5cf':'#b7cbf2'; ctx.beginPath(); ctx.arc(x,y,near||sel?4.5:3.4,0,7); ctx.fill();
-    ctx.font=`italic 400 ${fs+3}px ${SERIF}`; ctx.fillStyle=`rgba(244,244,244,${near||sel?1:.85})`; ctx.fillText(t.label||'uncharted', top[0], top[1]-22);
-    ctx.font=`500 ${Math.max(9,fs-2)}px ${SANS}`; ctx.fillStyle=`rgba(183,203,242,${near||sel?1:.7})`; ctx.fillText(sel?'heading here':'almost nothing here yet · click to go', top[0], top[1]-7); });
-  if (anim.start!=null){ const c=anim.start, x=PX[c], y=PY[c]; beacon(c,'rgba(244,244,244,.9)',.14); ctx.fillStyle='#f4f4f4'; ctx.beginPath(); ctx.arc(x,y,5,0,7); ctx.fill();
-    ctx.font=`500 ${fs}px ${SANS}`; ctx.fillStyle='#f4f4f4'; ctx.fillText('your taste', x, y+18); }
+    ctx.strokeStyle=`rgba(183,203,242,${near?.95:.55})`; ctx.lineWidth=near?2:1.4; ctx.setLineDash([6,6]); ctx.beginPath(); ctx.moveTo(from[0],from[1]); ctx.lineTo(p[0],p[1]); ctx.stroke(); ctx.setLineDash([]);
+    const pulse=6+2*Math.sin(now/300+ti);
+    ctx.strokeStyle='#b7cbf2'; ctx.lineWidth=near?2:1.4; ctx.beginPath(); ctx.ellipse(p[0],p[1],pulse+4,(pulse+4)*Math.max(.25,cam.ct),0,0,7); ctx.stroke();
+    ctx.fillStyle='#b7cbf2'; ctx.beginPath(); ctx.arc(p[0],p[1],near?5:3.6,0,7); ctx.fill();
+    ctx.font=`italic 400 ${fs+3}px ${SERIF}`; ctx.fillStyle=`rgba(244,244,244,${near?1:.88})`; ctx.fillText(t.label||'uncharted', p[0], p[1]-24);
+    ctx.font=`500 ${Math.max(9,fs-2)}px ${SANS}`; ctx.fillStyle=`rgba(183,203,242,${near?1:.75})`; ctx.fillText(near?'click to go this way →':`option ${ti+1}`, p[0], p[1]-9); });
+  // where your journey began: your taste
+  if (curr>=0){ const r=screenOf(...cellUV(anim.start ?? 0)); ctx.fillStyle='rgba(244,244,244,.85)'; ctx.beginPath(); ctx.arc(r[0],r[1],4.5,0,7); ctx.fill();
+    ctx.font=`500 ${Math.max(9,fs-2)}px ${SANS}`; ctx.fillText('your taste', r[0], r[1]+18); }
+  // where you are
+  ctx.fillStyle='#f4f4f4'; ctx.beginPath(); ctx.arc(from[0],from[1],6,0,7); ctx.fill();
+  ctx.strokeStyle='rgba(244,244,244,.6)'; ctx.lineWidth=1; ctx.beginPath(); ctx.arc(from[0],from[1],11+2*Math.sin(now/400),0,7); ctx.stroke();
+  ctx.font=`600 ${fs}px ${SANS}`; ctx.fillStyle='#f4f4f4'; ctx.fillText(curr<0?'you are here · your taste':'you are here', from[0], from[1]+22);
   // the cursor itself, and the name of the work it is closest to
   if (ptr.a>.01 && !ptr.drag){ ctx.strokeStyle=`rgba(244,244,244,${.85*ptr.a})`; ctx.lineWidth=1; ctx.beginPath(); ctx.arc(ptr.x,ptr.y,5,0,7); ctx.stroke();
     if (near && nd<18){ const what = DATA ? (near.mine?'your photo':near.kind?'passage':'photo') : THEMES[near.ti].n, label = near.title ? `${what} · ${near.title}` : what;
@@ -409,27 +421,56 @@ document.querySelectorAll('.rail [data-pane]').forEach(b=>b.onclick=()=>{
 });
 document.addEventListener('click', e=>{ const a=e.target.closest('[data-go-pane]'); if (a){ e.preventDefault(); go(a.dataset.goPane); } });
 // ---------- your saved identity: answers, routes and blocks carry across sessions ----------
-const BLANK = {obs:[], trail:[], paths:[], blocks:[], sessions:0, seenWorkIds:[]};
+const BLANK = {obs:[], trail:[], paths:[], blocks:[], sessions:0, seenWorkIds:[], nodes:[], cur:-1};
 let journey = (DATA && DATA.journey) || (()=>{ try { return JSON.parse(localStorage.getItem('compass-journey')); } catch(e) { return null; } })() || BLANK;
 journey = {...BLANK, ...journey};
+if (!Array.isArray(journey.nodes)) { journey.nodes = []; journey.cur = -1; }
 if (!Array.isArray(journey.seenWorkIds)) journey.seenWorkIds = [];
 function saveJourney(){ try { localStorage.setItem('compass-journey', JSON.stringify(journey)); } catch(e) {} callPy('compass.save', [journey]); }
 const cellXY = c => [(c%W+.5)/W, (((c/W)|0)+.5)/H];
 function routeFog(path){ if(!path||!path.length) return 1; let m=0; for (const c of path) m+=Math.min(1,SD[c]/SD0); return m/path.length; }
 function plan(fromCell){
-  anim.start = fromCell; anim.tg = targets(3, fromCell, history.length ? .18 : .3);
+  anim.start = fromCell;
+  const cur = journey.nodes[journey.cur];
+  const here = cur ? cellOf(cur.u, cur.v) : fromCell;
+  anim.tg = targets(3, here, .16);
   const describe=(window.UNCHARTED_BRIDGE||{})['compass.describe'];
   anim.tg.forEach(t=>{ const [u,v]=cellUV(t.c); const d=describe?describe(u,v):null; t.label=d&&d.words.length?d.words.slice(0,3).join(' · '):'uncharted'; });
   anim.sel=-1; anim.route=null; anim.cp=null; current=null;
+  $('sQ').textContent = journey.nodes.length;
 }
-// Choosing a star draws one route from your taste toward it, then asks you about the works out there.
+// Take a branch: it joins your tree, the map leans toward it, and Beyond opens with works from that direction.
 function chooseTarget(i){
   const t=anim.tg[i]; if (!t) return;
-  anim.sel=i; const r=astar(anim.start, t.c); anim.route={path:r.path, t:performance.now()};
-  journey.paths.push(r.path.filter((c,k)=>k%2===0 || k===r.path.length-1).map(cellXY)); journey.paths = journey.paths.slice(-8); saveJourney();
-  $('status').textContent=`From your taste → toward ${t.label}`;
+  const [u,v]=cellUV(t.c);
+  journey.nodes.push({u, v, label:t.label, parent:journey.cur ?? -1, when:new Date().toISOString().slice(0,10)});
+  journey.cur = journey.nodes.length-1;
+  const o={x:u, y:v, yv:1, w:.6}; obs.push(o); journey.obs.push(o); fit(); // choosing a direction is a mild "I'm curious"
+  journey.trail.push({title:`→ ${t.label}`, ans:'chose', when:new Date().toISOString().slice(0,10)}); saveJourney();
+  const li=document.createElement('li'); li.innerHTML=`<span>→ ${esc(t.label)}</span><span>${esc(new Date().toISOString().slice(0,10))}</span>`; $('trail').appendChild(li); $('trailcard').hidden=false; $('trail-empty').hidden=true;
+  cam.tfu=u; cam.tfv=v; cam.tzoom=1.5;
+  $('status').textContent=`Heading toward ${t.label} · opening Beyond…`;
+  plan(anim.start);
   clearTimeout(chooseTarget.timer);
-  chooseTarget.timer=setTimeout(()=>{ anim.cp=t.c; ask(t.c, `Toward ${t.label}`, `From your taste → toward ${t.label}`); }, REDUCE?0:1700);
+  chooseTarget.timer=setTimeout(()=>{
+    window.dispatchEvent(new CustomEvent('journey:branch', {detail:{x:u, y:v, label:t.label}}));
+    $('status').textContent='Your journey so far. Choose where to go next.';
+    document.querySelector('.rail [data-mode="exploration"]')?.click();
+  }, REDUCE?200:1300);
+}
+function branchFrom(k){
+  journey.cur = k; saveJourney();
+  const nd=journey.nodes[k];
+  if (nd){ cam.tfu=nd.u; cam.tfv=nd.v; cam.tzoom=1.3; }
+  $('status').textContent = nd ? `Back at ${nd.label}. Choose a new direction.` : 'Choose a direction.';
+  plan(anim.start);
+}
+function startOver(){
+  journey.nodes=[]; journey.cur=-1; saveJourney();
+  window.dispatchEvent(new CustomEvent('journey:reset'));
+  cam.tfu=cam.tfv=.5; cam.tzoom=1;
+  $('status').textContent='Choose a direction to start your journey';
+  plan(anim.start);
 }
 function checkpointOn(path){ // the foggiest point past the first fifth of the route: where an answer teaches the most
   let best=-1, bc=null; if (path.length < 6) return {cell:null, fog:0};
@@ -513,9 +554,11 @@ function start(){
   rnd = mulberry(7 + history.length); history=[]; reroutes=0; kappa=1; BETA=.9; anim.arrived=false;
   $('trail').innerHTML=''; $('trailcard').hidden=true; $('trail-empty').hidden=false; $('sQ').textContent='0';
   seedObs(); fit(); busy=true;
-  $('status').textContent='Click a star to see where your taste could go';
+  $('status').textContent = journey.nodes.length ? 'Your journey so far. Choose where to go next.' : 'Choose a direction to start your journey';
   plan(startCell()); $('map-cta').hidden=true; go('map');
 }
+$('map-start-over').onclick=startOver;
+window.addEventListener('focus:change', ()=>{ computeDensity(); fieldDirty=true; if (busy) plan(anim.start ?? startCell()); });
 window.addEventListener('compass:gallery-vote', e=>{
   const vote=e.detail;
   if (!vote || vote.id==null || !Number.isFinite(vote.x) || !Number.isFinite(vote.y)) return;

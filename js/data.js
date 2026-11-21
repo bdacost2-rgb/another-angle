@@ -24,6 +24,12 @@ export function dot(a, b) {
   return s;
 }
 
+// Words that take a work off the site: racial and ethnic slurs, other slurs, and explicit language.
+const OFFENSIVE = /\b(nigg(er|a|ah|uh)s?|negro(es|s)?|negress(es)?|dark(ey|y|ie)s?|coons?|pickaninn(y|ies)|chinks?|japs?|kikes?|spics?|wetbacks?|redskins?|squaws?|injuns?|gyps(y|ies)|gypped|fag(got)?s?|dykes?|trann(y|ies)|retard(ed|s)?|whores?|sluts?|cunts?|fuck\w*|bitch(es)?)\b/i;
+export function isOffensive(item) {
+  return OFFENSIVE.test([item.title, item.creator, item.text].filter(Boolean).join(" "));
+}
+
 export async function loadArchive(base = "data/") {
   const meta = await (await fetch(base + "items.json")).json();
   // Embeddings live in emb.bin, or inline as base64 (emb_b64) where .bin files can't be served.
@@ -58,10 +64,13 @@ export async function loadArchive(base = "data/") {
     const v = new Float32Array(dim);
     const m = means[it.kind];
     for (let d = 0; d < dim; d++) v[d] = raw[i][d] - m[d];
-    it.index = i;
     it.vec = normalize(v);
   });
-  return { items, dim, means, model: meta.model, raw, themes: meta.themes || [] };
+  // Leave out works with slurs or explicit language (some older texts and historic captions have them),
+  // so nobody meets them on the site. The rest are renumbered so every index still lines up.
+  const keep = items.map((it, i) => [it, raw[i]]).filter(([it]) => !isOffensive(it));
+  const kept = keep.map(([it], i) => { it.index = i; return it; });
+  return { items: kept, dim, means, model: meta.model, raw: keep.map(([, r]) => r), themes: meta.themes || [] };
 }
 
 // Turn a new CLIP vector (from your photo or words) into the same centered space.

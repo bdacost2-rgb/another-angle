@@ -215,7 +215,7 @@ function designRooms(rooms, dials) {
     room.signature = ranked.slice(0, 3).map(({ dial, value }) => (value >= 0.5 ? dial.high : dial.low));
     // Rooms built from your likes are named from what the AI measured in them: an adjective from the
     // second-strongest dial and a noun from the lead dial (unique to this room), e.g. "Midnight Tides".
-    if (room.fromTaste && room.signature.length >= 2) {
+    if (room.fromTaste && !room.pathLabel && room.signature.length >= 2) {
       const [noun, adj] = room.signature;
       room.title = `${POLE_ADJ[adj] || adj} ${POLE_NOUN[noun] || noun}`;
     }
@@ -524,7 +524,27 @@ export function initGallery(items, model, themes = []) {
       publishRooms(finished);
       return finished;
     }
-    // Exploration: only works you've never seen, each galaxy reaching outward from one of your taste groups.
+    // Exploration: only works you've never seen. First, the directions you chose on the map (newest first),
+    // each a galaxy of the unseen works nearest that spot; then galaxies reaching outward from your taste groups.
+    for (const branch of branches.slice(-3).reverse()) {
+      const near = [];
+      const ranked = pool().map((item) => [(item.x - branch.x) ** 2 + ((item.y - branch.y) * 0.625) ** 2, item]).sort((a, b) => a[0] - b[0]);
+      for (const [, item] of ranked) {
+        if (near.length >= 5) break;
+        if (usedTitles.has(workKey(item))) continue;
+        near.push(item); used.add(item.id); usedTitles.add(workKey(item));
+      }
+      if (!near.length) continue;
+      result.push({
+        ...recipe(near),
+        title: branch.label,
+        pathLabel: branch.label,
+        note: `The direction you chose on the map: ${branch.label}. Works you've never seen from that part of the map. Its name comes from what the AI measured in them.`,
+        works: near,
+        reach: new Map(near.map((item) => [item.id, `your path · ${branch.label}`])),
+        fromTaste: true,
+      });
+    }
     for (const group of groups) {
       const r = recipe(group);
       const centroid = centroidOf(group);
@@ -568,7 +588,6 @@ export function initGallery(items, model, themes = []) {
 
     const finished = result.filter((room) => room.works.length);
     designRooms(finished, dialSet || []);
-    publishRooms(finished);
     return finished;
   }
 
@@ -586,7 +605,20 @@ export function initGallery(items, model, themes = []) {
   }
   let pendingEntry = null;
   let building = false;
-  // Two galleries: your collection on the ocean, and exploration out in the universe.
+  // Directions you chose on the map's journey tree; each becomes a galaxy at the front of Beyond.
+  const BRANCH_KEY = "anotherangle.branches.v1";
+  let branches = (() => { try { return JSON.parse(localStorage.getItem(BRANCH_KEY) || "[]"); } catch { return []; } })();
+  const saveBranches = () => { try { localStorage.setItem(BRANCH_KEY, JSON.stringify(branches.slice(-12))); } catch { /* ignore */ } };
+  window.addEventListener("journey:branch", (event) => {
+    const { x, y, label } = event.detail || {};
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    branches.push({ x, y, label });
+    saveBranches();
+    pendingEntry = 0; // walk straight into the galaxy you just chose
+    if (engine && galleryMode === "exploration") build();
+  });
+  window.addEventListener("journey:reset", () => { branches = []; saveBranches(); if (engine && galleryMode === "exploration") build(); });
+  // Two galleries: your collection as a solar system, and exploration out in the universe.
   let galleryMode = "collection";
   window.GALLERY_MODE = galleryMode;
   window.addEventListener("gallery:mode", (event) => {
@@ -832,7 +864,7 @@ export function initGallery(items, model, themes = []) {
   function announceRoom(room, index) {
     if (!titleCard) return;
     // Short on purpose: the room's name and how it feels. The longer story is behind "why this room?".
-    titleCard.querySelector("small").textContent = room.planet ? `${room.planet} · room ${String(index + 1).padStart(2, "0")}` : `room ${String(index + 1).padStart(2, "0")}`;
+    titleCard.querySelector("small").textContent = room.planet ? `${room.planet} · room ${String(index + 1).padStart(2, "0")}` : room.pathLabel ? "the way you chose" : `room ${String(index + 1).padStart(2, "0")}`;
     titleCard.querySelector("strong").textContent = room.title;
     titleCard.querySelector("span").textContent = (room.signature || []).join(" · ");
     whyPanel.querySelector("p").textContent = room.note;

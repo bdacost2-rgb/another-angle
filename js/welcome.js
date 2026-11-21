@@ -32,7 +32,7 @@ const TOURS = {
     { title: "Go beyond your taste.", text: "Inspiration is where you find what you love. Uncharted is where it leads." },
     { sel: "[data-go-gallery='collection']", title: "Your world", text: "Your collection as a solar system: each planet holds a group of works you love. Scroll to travel round it." },
     { sel: "[data-go-gallery='exploration']", title: "Beyond", text: "Galaxies of works you've never seen, each a step further from your taste. ♥ what surprises you." },
-    { sel: "[data-go-gallery='map']", title: "The map", text: "Where your taste could go next. Click a star to head there and see what's out there." },
+    { sel: "[data-go-gallery='map']", title: "The map", text: "Your journey, as a tree that starts at your taste. Pick one of three directions and Beyond takes you there; come back to branch again." },
     { sel: ".uc-showme--gallery", title: "Photos, writing, or both", text: "The same switch as in Inspiration." },
     { sel: ".gallery-room", title: "Each room", text: "Named for what its works share. \"Why this room?\" shows how the AI grouped it." },
     { sel: ".gallery-controls", title: "Move between rooms", text: "Scroll to drift through, or jump room to room. Click any work to learn about it." },
