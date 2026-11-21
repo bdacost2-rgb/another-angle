@@ -5,7 +5,7 @@ import * as models from "./models.js";
 import { addPhotos, loadPhotos, asItems, mergeInto, clearPhotos } from "./mine.js";
 import { initLens, setWords } from "./lens.js";
 import { loadDials, itemDials, dialWord, strongestWords } from "./dials.js";
-import { setupWelcome } from "./welcome.js";
+import { setupWelcome, startTour, tourSeen } from "./welcome.js";
 
 const $ = (s) => document.querySelector(s);
 const ICON = {
@@ -654,7 +654,6 @@ function renderMsg(m) {
 // ---------- Start ----------
 async function main() {
   initLens();
-  if (location.hash !== "#coach" && location.hash !== "#write") setupWelcome("inspiration");
   document.querySelectorAll("[data-focus]").forEach((b) => b.addEventListener("click", () => { if (T) setFocus(b.dataset.focus); }));
   syncFocus();
   // The writing coach doesn't need the archive, so its tab is wired up first and works either way.
@@ -694,7 +693,7 @@ async function main() {
   loadSteer();
   updateSaved();
 
-  $("#pick-done").onclick = () => { commitPicks(); pickSet = []; updateSaved(); mode = { kind: "taste" }; show("feed"); resetFeed(); playReveal(); };
+  $("#pick-done").onclick = () => { commitPicks(); pickSet = []; updateSaved(); mode = { kind: "taste" }; show("feed"); resetFeed(); playReveal(); tourFeedWhenReady(); };
   $("#pick-more").onclick = () => {
     const kept = selectedPicks().length + earlierPicks().length;
     commitPicks(); renderPicks();
@@ -744,6 +743,19 @@ async function main() {
   if (location.hash === "#coach") { if (T.count < PICKS_NEEDED) renderPicks(); }
   else if (T.count >= PICKS_NEEDED) { show("feed"); resetFeed(); }
   else { renderPicks(); show("start"); }
+  // the guided tour: the picking tour on a first visit, or the feed tour if you arrive with picks already
+  const onFeed = () => !$("#view-feed").hidden;
+  if (location.hash !== "#coach") setupWelcome(onFeed() ? "feed" : "inspiration", { pick: () => (onFeed() ? "feed" : "inspiration") });
+}
+
+// After your first picks, once the "reading your taste" moment has finished, tour the feed's own features.
+function tourFeedWhenReady() {
+  if (tourSeen("feed")) return;
+  const wait = setInterval(() => {
+    if (!$("#reveal").hidden || !$("#feed .card")) return;
+    clearInterval(wait);
+    startTour("feed");
+  }, 400);
 }
 
 main();

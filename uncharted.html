@@ -209,6 +209,10 @@ label.k span { text-transform: none; opacity: .7; }
 .gallery-hud button { pointer-events: auto; }
 .gallery-exit, .gallery-controls button { height: 36px; padding: 0 14px; border: 1px solid rgba(243,236,224,.34); background: rgba(10,12,16,.18); color: var(--cream); font: 400 13px var(--body); letter-spacing: -.01em; cursor: pointer; -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); transition: border-color .25s, background .25s, color .25s; }
 .gallery-exit:hover, .gallery-controls button:hover:not(:disabled) { border-color: var(--cream); background: var(--cream); color: #16141c; }
+.gallery-nav { pointer-events: auto; display: inline-flex; gap: 2px; padding: 3px; border: 1px solid rgba(243,236,224,.3); border-radius: 999px; background: rgba(10,12,16,.25); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+.gallery-nav button { padding: 7px 14px; border: 0; border-radius: 999px; background: none; color: var(--cream); opacity: .7; font: 500 12px var(--body); cursor: pointer; }
+.gallery-nav button:hover { opacity: 1; }
+.gallery-nav button[aria-current="true"] { background: var(--cream); color: #16141c; opacity: 1; }
 .gallery-controls { display: flex; gap: 4px; }
 .gallery-controls button:disabled { opacity: .3; cursor: default; }
 .gallery-room { display: grid; justify-items: end; gap: 6px; text-align: right; }
@@ -428,7 +432,7 @@ details.how[open] summary h2::after { content: " −"; }
           <div class="gallery-scrim gallery-scrim--bottom" aria-hidden="true"></div>
           <div class="gallery-title" id="gallery-title" aria-live="polite"><small class="gallery-label"></small><strong></strong><span></span></div>
           <div class="gallery-hud gallery-hud--top">
-            <button type="button" class="gallery-exit" id="gallery-exit">← Sections</button>
+            <nav class="gallery-nav" id="gallery-exit" aria-label="Uncharted"><button type="button" data-go-gallery="collection">your world</button><button type="button" data-go-gallery="exploration">beyond</button><button type="button" data-go-gallery="map">map</button></nav>
             <div class="uc-showme uc-showme--gallery" role="group" aria-label="Show me"><span>show me</span><div class="uc-seg"><button type="button" data-focus="photo" aria-pressed="false">photos</button><button type="button" data-focus="both" aria-pressed="true">both</button><button type="button" data-focus="text" aria-pressed="false">writing</button></div></div>
             <div class="gallery-room"><span class="gallery-label" id="gallery-progress" aria-live="polite">room 01</span><b id="gallery-room-name"></b>
               <button type="button" class="gallery-why" id="gallery-why" aria-expanded="false" aria-controls="gallery-why-panel">why this room?</button>
@@ -443,7 +447,7 @@ details.how[open] summary h2::after { content: " −"; }
             <div class="gallery-loader" aria-hidden="true"><span id="gallery-load">0</span></div>
           </div>
           <div class="gallery-notice" id="gallery-notice" role="status" aria-live="polite"></div>
-          <div class="gallery-end" id="gallery-end" aria-hidden="true"><small class="gallery-label">the end of your walk · where next?</small><div><button type="button" id="gallery-write" tabindex="-1">Write from this room →</button><button type="button" id="gallery-explore" tabindex="-1">Explore further →</button></div></div>
+          <div class="gallery-end" id="gallery-end" aria-hidden="true"><small class="gallery-label">the end of your walk · where next?</small><div><button type="button" id="gallery-loop" tabindex="-1">Round again ↺</button><button type="button" id="gallery-write" tabindex="-1">Write from this room →</button><button type="button" id="gallery-explore" tabindex="-1">Explore further →</button></div></div>
           <div class="gallery-scroll-cue gallery-label" id="gallery-tip">Scroll to walk · click a work</div>
           <div class="gallery-hud gallery-hud--bottom">
             <div class="gallery-caption" id="gallery-caption" aria-live="polite"><strong></strong><small></small></div>

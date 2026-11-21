@@ -324,6 +324,10 @@ const PLANET_FRAGMENT = /* glsl */`
 uniform vec3 uSunDir;
 uniform vec3 uTint;
 uniform float uTime;
+uniform float uType; // 0 rocky, 1 living (Earth), 2 gas and ice giants
+uniform vec3 uA;
+uniform vec3 uB;
+uniform float uIce;
 varying vec3 vObj;
 varying vec3 vWN;
 varying vec3 vWPos;
@@ -337,12 +341,22 @@ float fbm(vec3 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++) { s += a
 void main() {
   vec3 n = normalize(vObj);
   float h = fbm(n * 7.0);
-  float land = smoothstep(0.5, 0.53, h);
-  vec3 ocean = mix(vec3(0.015, 0.07, 0.17), vec3(0.04, 0.22, 0.38), smoothstep(0.3, 0.5, h));
-  vec3 ground = mix(vec3(0.13, 0.28, 0.1), vec3(0.42, 0.35, 0.2), smoothstep(0.56, 0.72, h));
-  vec3 col = mix(ocean, ground, land);
-  col = mix(col, vec3(0.9, 0.93, 0.97), smoothstep(0.8, 0.92, abs(n.y) + (h - 0.5) * 0.3));
-  float cloud = smoothstep(0.6, 0.82, fbm(n * 11.0 + vec3(uTime * 0.01, 0.0, uTime * 0.005)));
+  float land = 0.0, cloud = 0.0;
+  vec3 col;
+  if (uType < 0.5) { // rocky: dusty plains and dark craters
+    float crater = smoothstep(0.62, 0.7, noise(n * 22.0)) * 0.5 + smoothstep(0.6, 0.75, noise(n * 9.0)) * 0.4;
+    col = mix(uA, uB, smoothstep(0.35, 0.7, h)) * (1.0 - crater * 0.45);
+  } else if (uType < 1.5) { // a living world
+    land = smoothstep(0.5, 0.53, h);
+    vec3 ocean = mix(vec3(0.015, 0.07, 0.17), vec3(0.04, 0.22, 0.38), smoothstep(0.3, 0.5, h));
+    vec3 ground = mix(vec3(0.13, 0.28, 0.1), vec3(0.42, 0.35, 0.2), smoothstep(0.56, 0.72, h));
+    col = mix(ocean, ground, land);
+    cloud = smoothstep(0.6, 0.82, fbm(n * 11.0 + vec3(uTime * 0.01, 0.0, uTime * 0.005)));
+  } else { // banded gas and ice
+    float band = sin(n.y * 26.0 + fbm(n * vec3(3.0, 12.0, 3.0) + vec3(uTime * 0.02, 0.0, 0.0)) * 4.0);
+    col = mix(uA, uB, 0.5 + 0.5 * band);
+  }
+  col = mix(col, vec3(0.9, 0.93, 0.97), uIce * smoothstep(0.82, 0.93, abs(n.y) + (h - 0.5) * 0.3));
   col = mix(col, vec3(0.95), cloud * 0.7);
   vec3 N = normalize(vWN);
   float light = dot(N, uSunDir);
@@ -357,6 +371,18 @@ void main() {
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }`;
+// The solar system your collection travels through, one planet per group, in order from the Sun.
+const PLANETS = [
+  { name: "Mercury", type: 0, a: [0.5, 0.48, 0.45], b: [0.3, 0.29, 0.28], r: 30, atmo: [0.5, 0.5, 0.5], air: 0.15 },
+  { name: "Venus", type: 2, a: [0.95, 0.86, 0.62], b: [0.82, 0.66, 0.4], r: 44, atmo: [1.0, 0.85, 0.55], air: 0.9 },
+  { name: "Earth", type: 1, a: [0, 0, 0], b: [0, 0, 0], r: 48, atmo: [0.35, 0.6, 1.0], air: 1, ice: 1 },
+  { name: "Mars", type: 0, a: [0.76, 0.36, 0.2], b: [0.46, 0.2, 0.12], r: 36, atmo: [1.0, 0.6, 0.45], air: 0.35, ice: 1 },
+  { name: "Jupiter", type: 2, a: [0.88, 0.75, 0.58], b: [0.62, 0.42, 0.3], r: 78, atmo: [1.0, 0.85, 0.7], air: 0.5 },
+  { name: "Saturn", type: 2, a: [0.94, 0.86, 0.64], b: [0.78, 0.66, 0.46], r: 66, atmo: [1.0, 0.9, 0.7], air: 0.5, ring: true },
+  { name: "Uranus", type: 2, a: [0.66, 0.88, 0.9], b: [0.55, 0.8, 0.84], r: 52, atmo: [0.6, 0.95, 1.0], air: 0.7 },
+  { name: "Neptune", type: 2, a: [0.3, 0.48, 0.9], b: [0.16, 0.3, 0.7], r: 50, atmo: [0.35, 0.55, 1.0], air: 0.8 },
+];
+
 const ATMOSPHERE_FRAGMENT = /* glsl */`
 uniform vec3 uSunDir;
 uniform vec3 uTint;
@@ -439,11 +465,13 @@ export function initGallery(items, model, themes = []) {
 
   function updateIntro() {
     const heading = opening.querySelector("h2");
-    if (heading) heading.textContent = galleryMode === "collection" ? "A world you found." : "Beyond your taste.";
+    if (heading) heading.textContent = galleryMode === "collection" ? "Your solar system." : "Beyond your taste.";
+    const loop = $("#gallery-loop");
+    if (loop) loop.hidden = galleryMode !== "collection";
     const onward = $("#gallery-explore");
     if (onward) onward.textContent = galleryMode === "collection" ? "Explore beyond it →" : "Explore the map →";
     if (galleryMode === "collection") {
-      intro.textContent = model.liked.length ? `Your collection: ${model.liked.length} works you love, in orbit around it, grouped by how they feel.` : "Heart works in Inspiration to fill your collection.";
+      intro.textContent = model.liked.length ? `Everything you love, one planet for each group. ${model.liked.length} works, round and round.` : "Heart works in Inspiration to fill your collection.";
       return;
     }
     if (model.count >= 8 && model.liked.length >= 4) {
@@ -769,6 +797,7 @@ export function initGallery(items, model, themes = []) {
     } catch { /* without storage the coach still opens, just without the room */ }
     location.href = "index.html#write";
   });
+  $("#gallery-loop")?.addEventListener("click", () => scrollToDistance(-6)); // round the Sun again, back to Mercury
   $("#gallery-explore")?.addEventListener("click", () => {
     if (galleryMode === "collection") document.querySelector('.rail [data-mode="exploration"]')?.click();
     else document.querySelector('.rail [data-pane="map"]')?.click();
@@ -803,7 +832,7 @@ export function initGallery(items, model, themes = []) {
   function announceRoom(room, index) {
     if (!titleCard) return;
     // Short on purpose: the room's name and how it feels. The longer story is behind "why this room?".
-    titleCard.querySelector("small").textContent = room.ring ? "final room" : `room ${String(index + 1).padStart(2, "0")}`;
+    titleCard.querySelector("small").textContent = room.planet ? `${room.planet} · room ${String(index + 1).padStart(2, "0")}` : `room ${String(index + 1).padStart(2, "0")}`;
     titleCard.querySelector("strong").textContent = room.title;
     titleCard.querySelector("span").textContent = (room.signature || []).join(" · ");
     whyPanel.querySelector("p").textContent = room.note;
@@ -859,7 +888,14 @@ export function initGallery(items, model, themes = []) {
 
   previous.addEventListener("click", () => changeRoom(roomIndex - 1));
   next.addEventListener("click", () => changeRoom(roomIndex + 1, true));
-  exit.addEventListener("click", () => document.querySelector('.rail [data-pane="seed"]')?.click());
+  // inside the gallery the side rail is hidden, so a small switch moves between your world, beyond and the map
+  exit.querySelectorAll("[data-go-gallery]").forEach((b) => b.addEventListener("click", () => {
+    const target = b.dataset.goGallery;
+    document.querySelector(target === "map" ? '.rail [data-pane="map"]' : `.rail [data-mode="${target}"]`)?.click();
+  }));
+  const syncNav = () => exit.querySelectorAll("[data-go-gallery]").forEach((b) => b.setAttribute("aria-current", String(b.dataset.goGallery === galleryMode)));
+  window.addEventListener("gallery:mode", () => requestAnimationFrame(syncNav));
+  requestAnimationFrame(syncNav);
   stage.addEventListener("keydown", (event) => {
     if (event.target.closest("#gallery-list")) return;
     if (event.key === "ArrowRight") { event.preventDefault(); changeRoom(roomIndex + 1, true); }
@@ -1125,22 +1161,49 @@ export function initGallery(items, model, themes = []) {
       scene.add(sky);
     }
 
-    // ----- the planet you found (your collection): built once, shown only in that gallery -----
-    const PLANET_R = 90, PLANET_DROP = 112;
-    const sunDir = new THREE.Vector3(0.55, 0.62, 0.25).normalize(); // lights the side of the planet you see
-    const planetUniforms = { uSunDir: { value: sunDir }, uTint: { value: new THREE.Color(0x5a9cff) }, uTime: { value: 0 } };
-    const planet = new THREE.Group();
-    const surface = new THREE.Mesh(new THREE.SphereGeometry(PLANET_R, 160, 80), new THREE.ShaderMaterial({ uniforms: planetUniforms, vertexShader: PLANET_VERTEX, fragmentShader: PLANET_FRAGMENT }));
-    const atmosphere = new THREE.Mesh(new THREE.SphereGeometry(PLANET_R * 1.035, 96, 48), new THREE.ShaderMaterial({
-      uniforms: planetUniforms, vertexShader: PLANET_VERTEX, fragmentShader: ATMOSPHERE_FRAGMENT,
-      side: THREE.BackSide, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
-    }));
-    planet.add(surface, atmosphere);
-    const sunGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture, color: 0xfff1d6, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    sunGlow.scale.setScalar(60);
-    planet.add(sunGlow);
-    planet.visible = false;
-    scene.add(planet);
+    // ----- the solar system (your collection): a planet per group, lit by a Sun at the start -----
+    const SUN_POS = new THREE.Vector3(-55, 18, -60); // ahead and to the left as you set off
+    function buildPlanet(group, spec, center, glowTint) {
+      const uniforms = {
+        uSunDir: { value: SUN_POS.clone().sub(center).normalize() }, uTint: { value: new THREE.Color(...spec.atmo).lerp(glowTint, 0.15) },
+        uTime: { value: 0 }, uType: { value: spec.type }, uA: { value: new THREE.Color(...spec.a) }, uB: { value: new THREE.Color(...spec.b) }, uIce: { value: spec.ice || 0 },
+      };
+      const holder = new THREE.Group();
+      const surface = new THREE.Mesh(track(new THREE.SphereGeometry(spec.r, 128, 64)), track(new THREE.ShaderMaterial({ uniforms, vertexShader: PLANET_VERTEX, fragmentShader: PLANET_FRAGMENT })));
+      surface.rotation.z = 0.2;
+      holder.add(surface);
+      if (spec.air > 0.2) {
+        const air = new THREE.Mesh(track(new THREE.SphereGeometry(spec.r * 1.035, 96, 48)), track(new THREE.ShaderMaterial({
+          uniforms: { ...uniforms, uTint: { value: uniforms.uTint.value.clone().multiplyScalar(spec.air) } },
+          vertexShader: PLANET_VERTEX, fragmentShader: ATMOSPHERE_FRAGMENT, side: THREE.BackSide, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+        })));
+        holder.add(air);
+      }
+      if (spec.ring) {
+        const ringTex = canvasTexture(THREE, 256, 4, (ctx, w, h) => {
+          for (let x = 0; x < w; x++) { const v = 0.5 + 0.5 * Math.sin(x * 0.35) * Math.sin(x * 0.07); ctx.fillStyle = `rgba(232,214,176,${(0.15 + v * 0.6) * (x > 20 ? 1 : x / 20)})`; ctx.fillRect(x, 0, 1, h); }
+        });
+        const geo = track(new THREE.RingGeometry(spec.r * 1.35, spec.r * 2.2, 128, 1));
+        const pos = geo.attributes.position, uv = geo.attributes.uv;
+        for (let i = 0; i < pos.count; i++) { const d = Math.hypot(pos.getX(i), pos.getY(i)); uv.setXY(i, (d - spec.r * 1.35) / (spec.r * 0.85), 0.5); }
+        const ring = new THREE.Mesh(geo, track(new THREE.MeshBasicMaterial({ map: track(ringTex), transparent: true, side: THREE.DoubleSide, depthWrite: false })));
+        ring.rotation.x = Math.PI / 2 - 0.35;
+        holder.add(ring);
+      }
+      holder.position.copy(center);
+      group.add(holder);
+      animators.push((t) => { surface.rotation.y = t * 0.012; uniforms.uTime.value = t; });
+    }
+    const sun = new THREE.Group();
+    {
+      const core = new THREE.Mesh(new THREE.SphereGeometry(16, 48, 24), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 1.25, 0.8), fog: false }));
+      const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture, color: 0xffd9a0, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      halo.scale.setScalar(150);
+      sun.add(core, halo);
+      sun.position.copy(SUN_POS);
+      sun.visible = false;
+      scene.add(sun);
+    }
 
     let world = null;
     let roomEnvs = [];
@@ -1253,6 +1316,13 @@ export function initGallery(items, model, themes = []) {
         const zFirst = -(z + approach + VIEW);
         const length = approach + VIEW + (n - 1) * GAP + 8;
         if (galleryMode !== "collection") galaxy(group, -(z + length / 2 + 2), Math.max(26, length * 0.6), c, hashString(room.title) + index * 977);
+        else {
+          const spec = PLANETS[index % PLANETS.length];
+          room.planet = spec.name;
+          // each planet sits below and to one side of your path, alternating, so each one is seen on its own
+          const scaled = { ...spec, r: spec.r * 0.42 };
+          buildPlanet(group, scaled, new THREE.Vector3((index % 2 ? 1 : -1) * (scaled.r + 7), -(scaled.r * 0.55 + 6), -(z + length / 2 + 4)), c.glow);
+        }
         // the galaxy comes into view: a stop as you arrive, then each work in turn
         path.push({ room: index, dwell: 2.6, z: -(z + approach * 0.35) });
         const roomStart = path.length - 1;
@@ -1279,14 +1349,11 @@ export function initGallery(items, model, themes = []) {
           group.add(new THREE.Points(geo, track(new THREE.PointsMaterial({ size: 0.06, map: glowTexture, color: c.glow.clone().lerp(new THREE.Color(0xffffff), 0.5), transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false }))));
         }
         for (const entry of entries.filter((e) => e.room === index)) hangWork(group, entry, await loadTexture(entry.item), c);
-        roomEnvs.push({
-          c, roomStart, fog: new THREE.Color(0x03040a).lerp(c.deep, 0.1), bloom: 0.45 + (room.design?.dream ?? 0.5) * 0.2,
-          tint: new THREE.Color(0x5a9cff).lerp(c.glow, 0.22), // the planet's atmosphere takes a little of each group's color
-        });
+        roomEnvs.push({ c, roomStart, fog: new THREE.Color(0x03040a).lerp(c.deep, 0.1), bloom: 0.45 + (room.design?.dream ?? 0.5) * 0.2 });
         z += length;
       }
       buildSky(z);
-      planet.visible = galleryMode === "collection";
+      sun.visible = galleryMode === "collection";
       // scroll distance: each stop takes a little scrolling, the glides between take more
       let unit = 0;
       path.forEach((stop, i) => {
@@ -1343,7 +1410,6 @@ export function initGallery(items, model, themes = []) {
       const a = roomEnvs[at.room], b = roomEnvs[at.next] || a, k = at.room === at.next ? 0 : at.k;
       scene.fog.color.copy(a.fog).lerp(b.fog, k);
       scene.background.copy(scene.fog.color);
-      if (planet.visible) planetUniforms.uTint.value.copy(a.tint).lerp(b.tint, k);
       if (bloom) bloom.strength = a.bloom + (b.bloom - a.bloom) * k;
       return k > 0.5 ? at.next : at.room;
     }
@@ -1366,13 +1432,6 @@ export function initGallery(items, model, themes = []) {
       look.pitch += (look.tPitch - look.pitch) * 0.05;
       camera.position.copy(at.pos);
       if (!reducedMotion.matches) { camera.position.y += Math.sin(t * 0.5) * 0.04; camera.position.x += Math.sin(t * 0.37) * 0.03; }
-      if (planet.visible) {
-        // the planet stays below you and turns as you travel, so you're circling it like a space station
-        planet.position.set(0, -PLANET_DROP, camera.position.z - 70);
-        surface.rotation.set(-camera.position.z / (PLANET_R * 1.6), t * 0.004, 0.18);
-        planetUniforms.uTime.value = t;
-        sunGlow.position.set(260, PLANET_DROP + 40, -260); // a distant sun off to the side
-      }
       const dir = tmpDir.copy(at.look).sub(camera.position);
       camera.rotation.set(Math.atan2(dir.y, Math.hypot(dir.x, dir.z)) + look.pitch * 0.6, Math.atan2(-dir.x, -dir.z) + look.yaw * 0.5, 0);
 

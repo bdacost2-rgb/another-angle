@@ -125,7 +125,6 @@ function readLand(items, dials) {
 
 async function main() {
   wireFocusButtons();
-  setupWelcome("uncharted");
   let A;
   try { A = await loadArchive(); } catch (e) { console.error(e); A = null; }
   if (A && A.themes.length) {
@@ -204,6 +203,7 @@ async function main() {
   if (!(A && A.themes.length)) initGallery([], null);
   const s = document.createElement("script");
   s.src = "js/uncharted_map.js";
+  s.onload = () => setTimeout(() => setupWelcome("uncharted"), 600); // tour once the gallery is on screen
   document.body.append(s);
 }
 
