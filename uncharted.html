@@ -407,7 +407,7 @@ details.how[open] summary h2::after { content: " −"; }
 @media (prefers-reduced-motion: reduce) { .pane { animation: none; } .gallery-opening::before { animation: none; } }
 </style>
 </head>
-<body>
+<body class="gallery-full">
 <nav class="sitebar" aria-label="Sections">
   <a class="brand" href="index.html"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 2 38 38H2Z"/></svg>Another Angle</a>
   <div class="tabs">
@@ -417,9 +417,9 @@ details.how[open] summary h2::after { content: " −"; }
     <button class="howto" type="button" data-welcome>how it works</button>
   </div>
 </nav>
-<div class="shell">
+<div class="shell gallery-mode">
   <nav class="rail" aria-label="Uncharted sections">
-    <button type="button" data-pane="seed" aria-current="true"><span>00</span>start</button>
+    <button type="button" data-pane="seed" hidden><span>00</span>start</button>
     <button type="button" data-pane="gallery" data-mode="collection"><span>01</span>your world</button>
     <button type="button" data-pane="gallery" data-mode="exploration"><span>02</span>beyond</button>
     <button type="button" data-pane="map"><span>03</span>map</button>
@@ -430,7 +430,7 @@ details.how[open] summary h2::after { content: " −"; }
 
   <div class="panes">
     <!-- 01 seed -->
-    <section class="pane pane-seed" id="pane-seed" aria-label="Seed your map">
+    <section class="pane pane-seed" id="pane-seed" aria-label="Seed your map" hidden>
       <div class="tag">00 · start</div>
       <h1>Find the work <em>only you</em> would make.</h1>
       <p class="lede">Go beyond your taste: what you love, what lies just past it, and where it leads.</p>
@@ -455,7 +455,7 @@ details.how[open] summary h2::after { content: " −"; }
     </section>
 
     <!-- 02 gallery -->
-    <section class="pane pane-gallery" id="pane-gallery" aria-label="Your inspiration gallery" hidden>
+    <section class="pane pane-gallery" id="pane-gallery" aria-label="Your inspiration gallery">
       <div class="gallery-journey" id="gallery-journey">
         <div class="gallery-stage" id="gallery-stage" tabindex="0" aria-label="A walk over water through rooms grouped by aesthetic, ending in a ring of works">
           <canvas class="gallery-canvas" id="gallery-canvas" aria-hidden="true"></canvas>
