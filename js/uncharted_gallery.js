@@ -213,8 +213,27 @@ function designRooms(rooms, dials) {
     if (j >= 0) ranked.unshift(...ranked.splice(ranked.findIndex(({ dial }) => dial === dials[j]), 1));
     room.dialRows = ranked;
     room.signature = ranked.slice(0, 3).map(({ dial, value }) => (value >= 0.5 ? dial.high : dial.low));
+    // Rooms built from your likes are named from what the AI measured in them: an adjective from the
+    // second-strongest dial and a noun from the lead dial (unique to this room), e.g. "Midnight Tides".
+    if (room.fromTaste && room.signature.length >= 2) {
+      const [noun, adj] = room.signature;
+      room.title = `${POLE_ADJ[adj] || adj} ${POLE_NOUN[noun] || noun}`;
+    }
   });
 }
+
+const POLE_NOUN = {
+  overgrown: "Gardens", built: "Streets", nocturnal: "Nocturnes", daylit: "Daylight", crowded: "Crowds", sparse: "Horizons",
+  turbulent: "Storms", still: "Stillness", weightless: "Drifts", grounded: "Stones", warm: "Embers", cold: "Frost",
+  ruined: "Ruins", pristine: "Clear Light", dreamlike: "Dreams", real: "Records", wet: "Tides", dry: "Dust",
+  monumental: "Monuments", intimate: "Interiors", ordered: "Patterns", irregular: "Wanderings", futuristic: "Futures", ancient: "Antiquities",
+};
+const POLE_ADJ = {
+  overgrown: "Overgrown", built: "Built", nocturnal: "Midnight", daylit: "Sunlit", crowded: "Crowded", sparse: "Quiet",
+  turbulent: "Restless", still: "Still", weightless: "Floating", grounded: "Heavy", warm: "Golden", cold: "Silver",
+  ruined: "Fading", pristine: "Polished", dreamlike: "Dreaming", real: "Everyday", wet: "Misty", dry: "Dusty",
+  monumental: "Vast", intimate: "Small", ordered: "Ordered", irregular: "Wandering", futuristic: "Electric", ancient: "Ancient",
+};
 
 // The best one-to-one matching of rows to columns (maximum total score), by dynamic programming over
 // subsets of columns. Rows beyond the number of columns get -1.
@@ -383,8 +402,8 @@ export function initGallery(items, model, themes = []) {
       const near = r.neighbors.slice(1).map(({ name }) => name).join(", ");
       result.push({
         ...r,
-        title: r.theme?.n || "The works you brought",
-        note: `${works.length === 1 ? "One of your works" : `${works.length} of your works that look and read alike`}, grouped by the AI (CLIP)${near ? `. Also close to ${near}` : ""}. ${r.theme?.desc ? `${r.theme.desc[0].toUpperCase()}${r.theme.desc.slice(1)}.` : ""} The galaxy's colors come from how these works feel.`,
+        title: r.theme?.n || "The works you brought", // replaced by a name read from the works (designRooms)
+        note: `${works.length === 1 ? "One of your works" : `${works.length} of your works that look and read alike`}, grouped by the AI (CLIP). Its name comes from what the AI measured in these works.${r.neighbors[0] ? ` Closest curated theme: ${r.neighbors[0].name}${r.neighbors[1] ? `, then ${r.neighbors[1].name}` : ""}.` : ""}`,
         works,
         fromTaste: true,
       });
@@ -420,7 +439,7 @@ export function initGallery(items, model, themes = []) {
       neighbors: lead?.neighbors || [],
       coherence: lead?.coherence ?? 0.7,
       title: "The room your choices opened",
-      note: "A ring of new works on still water, gathered from the directions your taste has opened.",
+      note: "A last cluster of new works, gathered from the directions your taste has opened.",
       works: ring,
       ring: true,
     });
@@ -1079,7 +1098,8 @@ export function initGallery(items, model, themes = []) {
       picks.push(art);
     }
 
-    const GAP = 9; // distance between works along the way
+    const GAP = 8; // distance back between works along the spiral
+    const SPIRAL_R = 4.6, SPIRAL_STEP = 1.0; // each work sits a turn further around the spiral
     const VIEW = 4.2; // how far in front of a work you stop to look at it
     async function buildRooms(roomList) {
       if (world) {
@@ -1108,13 +1128,28 @@ export function initGallery(items, model, themes = []) {
         // the galaxy comes into view: a stop as you arrive, then each work in turn
         path.push({ room: index, dwell: 2.6, z: -(z + approach * 0.35) });
         const roomStart = path.length - 1;
+        // The works wind around a spiral that recedes into the distance, like a path of stars: from each one
+        // you can see the next, a little further around and back, and you glide beside it rather than through.
+        const spin = index % 2 ? -1 : 1, phase = index * 0.7;
+        const spiralAt = (u) => new THREE.Vector3(SPIRAL_R * Math.sin(spin * u * SPIRAL_STEP + phase), 1.8 + SPIRAL_R * 0.42 * Math.cos(spin * u * SPIRAL_STEP + phase), zFirst - u * GAP);
+        path[path.length - 1].lookAt = spiralAt(0);
         room.works.forEach((item, i) => {
-          // a gentle, slow drift in height and side keeps the line alive without swinging you around
-          const position = new THREE.Vector3(Math.sin(i * 1.3 + index) * 0.6, 1.75 + Math.cos(i * 0.9 + index) * 0.25, zFirst - i * GAP);
+          const position = spiralAt(i);
           const entry = { item, room: index, position, distance: 0 };
           entries.push(entry);
-          path.push({ room: index, dwell: 2.8, z: position.z + VIEW, x: position.x * 0.85, y: position.y + 0.05, entry });
+          path.push({ room: index, dwell: 2.8, z: position.z + VIEW, x: position.x, y: position.y + 0.05, lookAt: position.clone(), entry });
         });
+        // a faint trail of tiny stars along the spiral, linking the works like a constellation
+        {
+          const steps = Math.max(1, n - 1) * 60, pos = new Float32Array(steps * 3);
+          for (let k = 0; k < steps; k++) {
+            const pt = spiralAt((k / steps) * Math.max(1, n - 1));
+            pos.set([pt.x + (Math.random() - 0.5) * 0.25, pt.y + (Math.random() - 0.5) * 0.25, pt.z + (Math.random() - 0.5) * 0.25], k * 3);
+          }
+          const geo = track(new THREE.BufferGeometry());
+          geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+          group.add(new THREE.Points(geo, track(new THREE.PointsMaterial({ size: 0.06, map: glowTexture, color: c.glow.clone().lerp(new THREE.Color(0xffffff), 0.5), transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false }))));
+        }
         for (const entry of entries.filter((e) => e.room === index)) hangWork(group, entry, await loadTexture(entry.item), c);
         roomEnvs.push({ c, roomStart, fog: new THREE.Color(0x03040a).lerp(c.deep, 0.1), bloom: 0.45 + (room.design?.dream ?? 0.5) * 0.2 });
         z += length;
@@ -1125,6 +1160,7 @@ export function initGallery(items, model, themes = []) {
       path.forEach((stop, i) => {
         stop.x = stop.x ?? 0;
         stop.y = stop.y ?? 1.8;
+        stop.lookAt = stop.lookAt ?? new THREE.Vector3(stop.x, stop.y, stop.z - 10);
         if (i > 0) unit += Math.max(3, Math.abs(path[i - 1].z - stop.z) * 0.55);
         stop.at = unit;
         unit += stop.dwell;
@@ -1144,13 +1180,13 @@ export function initGallery(items, model, themes = []) {
     }
 
     // Where the camera is for a scroll distance: resting at a stop, or gliding forward to the next.
-    const tmpPos = new THREE.Vector3();
+    const tmpPos = new THREE.Vector3(), tmpLook = new THREE.Vector3();
     function pathAt(u) {
       if (!path.length) return null;
-      const rest = (stop) => ({ pos: tmpPos.set(stop.x, stop.y, stop.z), stop, room: stop.room, next: stop.room, k: 0 });
+      const rest = (stop) => ({ pos: tmpPos.set(stop.x, stop.y, stop.z), look: tmpLook.copy(stop.lookAt), stop, room: stop.room, next: stop.room, k: 0 });
       if (u <= path[0].at) {
         const first = path[0]; // before the first stop, drift in from a little further back
-        return { pos: tmpPos.set(first.x, first.y, first.z + Math.min(8, (first.at - u) * 1.2)), stop: first, room: first.room, next: first.room, k: 0 };
+        return { pos: tmpPos.set(first.x, first.y, first.z + Math.min(8, (first.at - u) * 1.2)), look: tmpLook.copy(first.lookAt), stop: first, room: first.room, next: first.room, k: 0 };
       }
       for (let i = 0; i < path.length; i++) {
         const stop = path[i], next = path[i + 1];
@@ -1158,7 +1194,14 @@ export function initGallery(items, model, themes = []) {
         if (u < next.at) {
           const t = (u - stop.at - stop.dwell) / (next.at - stop.at - stop.dwell);
           const e = t * t * (3 - 2 * t);
-          return { pos: tmpPos.set(stop.x + (next.x - stop.x) * e, stop.y + (next.y - stop.y) * e, stop.z + (next.z - stop.z) * e), stop: e > 0.5 ? next : stop, room: stop.room, next: next.room, k: e };
+          // glide around the spiral (a curve that swings out past the work you're leaving), turning toward the next
+          const swing = Math.sin(e * Math.PI) * 1.4;
+          const dx = next.x - stop.x, dy = next.y - stop.y, len = Math.hypot(dx, dy) || 1;
+          return {
+            pos: tmpPos.set(stop.x + dx * e - (dy / len) * swing * 0.3 + (dx / len) * swing * 0.6, stop.y + dy * e + (dy / len) * swing * 0.3, stop.z + (next.z - stop.z) * e),
+            look: tmpLook.copy(stop.lookAt).lerp(next.lookAt, Math.min(1, e * 1.3)),
+            stop: e > 0.5 ? next : stop, room: stop.room, next: next.room, k: e,
+          };
         }
       }
       return rest(path[path.length - 1]);
@@ -1172,6 +1215,7 @@ export function initGallery(items, model, themes = []) {
       return k > 0.5 ? at.next : at.room;
     }
 
+    const tmpDir = new THREE.Vector3();
     function frame() {
       running = false;
       if (!visible || !path.length || stage.offsetParent === null) return;
@@ -1189,7 +1233,8 @@ export function initGallery(items, model, themes = []) {
       look.pitch += (look.tPitch - look.pitch) * 0.05;
       camera.position.copy(at.pos);
       if (!reducedMotion.matches) { camera.position.y += Math.sin(t * 0.5) * 0.04; camera.position.x += Math.sin(t * 0.37) * 0.03; }
-      camera.rotation.set(-0.02 + look.pitch * 0.6, look.yaw * 0.5, 0);
+      const dir = tmpDir.copy(at.look).sub(camera.position);
+      camera.rotation.set(Math.atan2(dir.y, Math.hypot(dir.x, dir.z)) + look.pitch * 0.6, Math.atan2(-dir.x, -dir.z) + look.yaw * 0.5, 0);
 
       const index = applyEnv(at);
       roomIndex = index;
@@ -1212,13 +1257,14 @@ export function initGallery(items, model, themes = []) {
         if (!entry.holder) continue;
         // ahead: visible; close: it glows; passing through: it dissolves into light
         const ahead = camera.position.z - entry.position.z;
-        const fade = Math.max(0, Math.min(1, (ahead - 0.8) / 2.2));
+        const fade = Math.max(0, Math.min(1, (ahead + 1.2) / 2.4)); // gently gone once it's behind you
         entry.art.material.opacity = fade;
         entry.frameMesh.material.opacity = fade;
-        entry.holder.visible = ahead > 0.2;
+        entry.holder.visible = ahead > -1.2;
+        entry.holder.lookAt(camera.position.x, entry.holder.position.y, camera.position.z); // works turn softly to face you
         const lit = entry === hovered ? 0.45 : entry === current ? 0.28 : 0.1;
         entry.halo.material.opacity += (lit * (0.4 + 0.6 * fade) + (1 - fade) * 0.35 * (ahead > 0.2 ? 1 : 0) - entry.halo.material.opacity) * 0.15;
-        const s = (entry === hovered ? 1.04 : 1) + (1 - fade) * 0.35;
+        const s = entry === hovered ? 1.04 : 1;
         entry.holder.scale.setScalar(entry.holder.scale.x + (s - entry.holder.scale.x) * 0.2);
         if (!reducedMotion.matches) entry.holder.position.y = entry.position.y + Math.sin(t * 0.6 + entry.phase) * 0.05;
       }
