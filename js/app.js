@@ -355,7 +355,7 @@ function playReveal() {
     return [row, basePosition(profile[k]) / 100];
   });
   box.querySelector(".reveal-words strong").textContent = words.length ? words.join(" · ") : "a bit of everything";
-  box.querySelector(".reveal-words small").textContent = `Your taste, read by CLIP from your ${T.count} choices`;
+  box.querySelector(".reveal-words small").textContent = `Your taste, from your ${T.count} choices`;
 
   const finish = () => {
     revealTimers.forEach(clearTimeout);
@@ -484,7 +484,7 @@ function pairCard(lead, partner) {
   if (text) card.append(passage(text, lead.kind === "text"), credit(text));
   const shared = sharedWords(photo, text);
   if (photo && text && DIALS.length) {
-    card.append(el("div", { class: "pairing" }, shared.length ? "Paired by CLIP · both " : "Paired by CLIP for meaning", shared.length ? el("em", {}, shared.join(" · ")) : null));
+    card.append(el("div", { class: "pairing" }, shared.length ? "Both feel " : "Paired for their meaning", shared.length ? el("em", {}, shared.join(" · ")) : null));
   }
   const why = mode.kind === "taste" && T.because(lead);
   if (why) card.append(el("div", { class: "because" }, "Because you liked ", why.kind === "photo" ? `"${(why.title || "a photo").slice(0, 50)}"` : `a passage from ${why.title || why.creator}`));

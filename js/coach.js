@@ -202,7 +202,7 @@ export class Coach {
     seed.lastPrompt = prompt;
     this.s.prompt = prompt;
     if (!again) {
-      const read = seed.words?.length ? ` CLIP reads ${seed.room ? "this room" : "them both"} as ${seed.words.join(" · ")}.` : "";
+      const read = seed.words?.length ? ` ${seed.room ? "This room feels" : "They both feel"} ${seed.words.join(" · ")}.` : "";
       this.bot(`${seed.room ? `Let's write from “${seed.room}”.` : "Let's write from this pair."}${read}`, { card: seed.item ? { item: seed.item, partner: seed.partner } : null });
     }
     this.ask("inspired", `Prompt: ${prompt}\n\nWrite a few lines. Rough is fine.`, { input: "Your first lines", multiline: true, options: ["Another prompt"] });

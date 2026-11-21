@@ -484,18 +484,18 @@ export function initGallery(items, model, themes = []) {
 
   function setTip() {
     tip.textContent = finePointer
-      ? "Scroll to walk on the water · move your cursor to look · select a work"
-      : "Scroll to walk · tap a work to learn about it";
+      ? "Scroll to walk · move to look · click a work"
+      : "Scroll to walk · tap a work";
   }
   setTip();
 
   function updateIntro() {
     if (model.count >= 8 && model.liked.length >= 4) {
-      intro.textContent = `Built from ${model.count} choices. CLIP grouped the works you were drawn to by how they look and read, and each group became a room. CLIP then scored each group on twelve design dials (built or overgrown, day or night, still or stormy, grounded or weightless…), and every room is generated from its own scores.`;
+      intro.textContent = `Built from your ${model.count} choices. Each room is a group of works that feel alike, and the world around them is shaped by how they feel.`;
     } else if (model.count >= 8) {
-      intro.textContent = `Built from ${model.count} choices. Save a few more works (♥) and CLIP will group them into rooms of their own.`;
+      intro.textContent = `Built from your ${model.count} choices. Save a few more works (♥) and they'll become rooms of their own.`;
     } else {
-      intro.textContent = "This is a preview. As you choose works in Inspiration, CLIP will group them by aesthetic and build a room around each group.";
+      intro.textContent = "A preview. As you choose works in Inspiration, they'll be grouped into rooms built around how they feel.";
     }
   }
 
@@ -519,7 +519,7 @@ export function initGallery(items, model, themes = []) {
       result.push({
         ...r,
         title: r.theme?.n || "The works you brought",
-        note: `${works.length} ${works.length === 1 ? "work" : "works"} grouped by CLIP${near ? ` · also near ${near}` : ""}. ${r.theme?.desc ? `${r.theme.desc[0].toUpperCase()}${r.theme.desc.slice(1)}.` : ""}`,
+        note: `${works.length === 1 ? "One of your works" : `${works.length} of your works that look and read alike`}, grouped by the AI (CLIP)${near ? `. Also close to ${near}` : ""}. ${r.theme?.desc ? `${r.theme.desc[0].toUpperCase()}${r.theme.desc.slice(1)}.` : ""} The scenery, light and weather come from how these works feel.`,
         works,
         fromTaste: true,
       });
@@ -739,6 +739,7 @@ export function initGallery(items, model, themes = []) {
   function updateControls(distance, p) {
     const room = rooms[roomIndex];
     showEnd(Boolean(room?.ring) && (p > 0.97 || distance >= layout.ringCenter + ORBIT_UNITS * 0.55));
+    tip.classList.toggle("is-done", distance > 4); // the "scroll to walk" hint leaves once you're walking
     const label = `${room?.ring ? "ring room" : "room"} ${String(roomIndex + 1).padStart(2, "0")} / ${String(rooms.length).padStart(2, "0")}`;
     if (progress.textContent !== label) progress.textContent = label;
     if (roomName && room && roomName.textContent !== room.title) roomName.textContent = room.title;
@@ -752,12 +753,21 @@ export function initGallery(items, model, themes = []) {
   }
 
   let titleTimer = 0;
+  const whyButton = $("#gallery-why");
+  const whyPanel = $("#gallery-why-panel");
+  whyButton?.addEventListener("click", () => {
+    const open = whyPanel.hidden;
+    whyPanel.hidden = !open;
+    whyButton.setAttribute("aria-expanded", String(open));
+  });
   function announceRoom(room, index) {
     if (!titleCard) return;
-    titleCard.querySelector("small").textContent = [room.ring ? "final room" : `room ${String(index + 1).padStart(2, "0")}`, ...room.signature].join(" · ");
+    // Short on purpose: the room's name and how it feels. The longer story is behind "why this room?".
+    titleCard.querySelector("small").textContent = room.ring ? "final room" : `room ${String(index + 1).padStart(2, "0")}`;
     titleCard.querySelector("strong").textContent = room.title;
-    titleCard.querySelector("span").textContent = room.note;
-    const readout = titleCard.querySelector(".gallery-dials");
+    titleCard.querySelector("span").textContent = (room.signature || []).join(" · ");
+    whyPanel.querySelector("p").textContent = room.note;
+    const readout = whyPanel.querySelector(".gallery-dials");
     if (readout) {
       readout.replaceChildren();
       (room.dialRows || []).slice(0, 6).forEach(({ dial, value }, i) => {
@@ -775,7 +785,7 @@ export function initGallery(items, model, themes = []) {
     void titleCard.offsetWidth;
     titleCard.classList.add("is-on");
     clearTimeout(titleTimer);
-    titleTimer = setTimeout(() => titleCard.classList.remove("is-on"), 6400);
+    titleTimer = setTimeout(() => titleCard.classList.remove("is-on"), 4600);
     if (mist && !reducedMotion.matches) {
       mist.classList.remove("is-clearing");
       void mist.offsetWidth;
