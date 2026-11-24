@@ -1366,14 +1366,15 @@ export function initGallery(items, model, themes = []) {
       const frameColor = yours ? new THREE.Color(0xf2c27a) : new THREE.Color(0xc9d6f2).lerp(c.glow, 0.15);
       const frame = new THREE.Mesh(track(new THREE.PlaneGeometry(width + (yours ? 0.12 : 0.08), h + (yours ? 0.12 : 0.08))), track(new THREE.MeshBasicMaterial({ color: frameColor.multiplyScalar(0.85), transparent: true })));
       frame.position.z = -0.01;
-      const art = new THREE.Mesh(track(new THREE.PlaneGeometry(width, h)), track(new THREE.MeshBasicMaterial({ map, toneMapped: false, transparent: true })));
+      // passages are pale cards; keep them just under the glow's threshold so the words stay crisp
+      const art = new THREE.Mesh(track(new THREE.PlaneGeometry(width, h)), track(new THREE.MeshBasicMaterial({ map, toneMapped: false, transparent: true, color: new THREE.Color(1, 1, 1).multiplyScalar(isText ? 0.66 : 1) })));
       const halo = new THREE.Mesh(track(new THREE.PlaneGeometry(width * 1.9, h * 1.8)), track(new THREE.MeshBasicMaterial({ map: glowTexture, color: c.glow.clone().lerp(new THREE.Color(0xffffff), 0.3), transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false })));
       halo.position.z = -0.05;
       holder.add(halo, frame, art);
       holder.position.copy(entry.position);
       group.add(holder);
       art.userData.entry = entry;
-      Object.assign(entry, { holder, halo, art, frameMesh: frame, phase: Math.random() * 6.28 });
+      Object.assign(entry, { holder, halo, art, frameMesh: frame, phase: Math.random() * 6.28, glowScale: isText ? 0.3 : 1 });
       picks.push(art);
     }
 
@@ -1561,8 +1562,8 @@ export function initGallery(items, model, themes = []) {
         entry.frameMesh.material.opacity = fade;
         entry.holder.visible = ahead > -1.2;
         entry.holder.lookAt(camera.position.x, entry.holder.position.y, camera.position.z); // works turn softly to face you
-        const lit = entry === hovered ? 0.45 : entry === current ? 0.28 : 0.1;
-        entry.halo.material.opacity += (lit * (0.4 + 0.6 * fade) + (1 - fade) * 0.35 * (ahead > 0.2 ? 1 : 0) - entry.halo.material.opacity) * 0.15;
+        const lit = (entry === hovered ? 0.45 : entry === current ? 0.28 : 0.1) * (entry.glowScale ?? 1);
+        entry.halo.material.opacity += (lit * (0.4 + 0.6 * fade) + (1 - fade) * 0.35 * (entry.glowScale ?? 1) * (ahead > 0.2 ? 1 : 0) - entry.halo.material.opacity) * 0.15;
         const s = entry === hovered ? 1.04 : 1;
         entry.holder.scale.setScalar(entry.holder.scale.x + (s - entry.holder.scale.x) * 0.2);
         if (!reducedMotion.matches) entry.holder.position.y = entry.position.y + Math.sin(t * 0.6 + entry.phase) * 0.05;
