@@ -234,7 +234,7 @@ export class Coach {
     try { found = await this.matchImages(text); } catch (e) { console.warn("Image matcher failed", e); found = []; }
     this.state = resume;
     if (!found.length) return this.bot("I couldn't load the image matcher just now. Check your connection and try again.");
-    this.bot("These photos from the archive sit closest to what you wrote. ♥ any you want to keep:", { cards: found });
+    this.bot("These photos from the archive sit closest to what you wrote. Use them to picture your characters, build your setting, or find the mood of the scene. ♥ any you want to keep:", { cards: found });
   }
 
   askProblem() {
