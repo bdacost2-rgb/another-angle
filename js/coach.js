@@ -227,10 +227,12 @@ export class Coach {
   // Pair your own writing with images: CLIP reads your words and finds the archive photos closest to them.
   async showMatches(text) {
     if (!text || !this.matchImages) return;
+    const resume = this.state; // keep your place in the conversation
     this.state = "thinking";
     this.bot("Looking for images that match your words… (the first time loads the AI, about a minute)");
     let found = [];
-    try { found = await this.matchImages(text); } catch (e) { found = []; }
+    try { found = await this.matchImages(text); } catch (e) { console.warn("Image matcher failed", e); found = []; }
+    this.state = resume;
     if (!found.length) return this.bot("I couldn't load the image matcher just now. Check your connection and try again.");
     this.bot("These photos from the archive sit closest to what you wrote. ♥ any you want to keep:", { cards: found });
   }

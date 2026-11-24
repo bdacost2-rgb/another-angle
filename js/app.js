@@ -695,6 +695,19 @@ async function main() {
     ta.value = "";
     coach.reply(v);
   };
+  // Match images: whatever is in the box, or the last thing you wrote, paired with the closest archive photos
+  $("#chat-match").addEventListener("click", () => {
+    if (!coach) return;
+    const ta = $("#chat-text");
+    const mine = [...document.querySelectorAll("#chat .msg.me")].map((m) => m.textContent).filter((t) => t.split(/\s+/).length > 3);
+    const text = ta.value.trim() || coach.s?.draft || mine[mine.length - 1] || "";
+    if (!text) { toast("Write something first, then match images to it."); return; }
+    const waiting = pending; // the question the coach was asking, so you can pick up where you left off
+    if (ta.value.trim()) { renderMsg({ from: "me", text: ta.value.trim() }); ta.value = ""; }
+    coach.showMatches(text).then(() => {
+      if (waiting && waiting.from === "bot" && coach.state) renderMsg({ ...waiting, text: `Back to where we were: ${waiting.text}` });
+    });
+  });
   $("#chat-text").addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#chat-form").requestSubmit(); }
   });

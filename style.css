@@ -149,6 +149,7 @@ main { padding: 24px; max-width: 1600px; margin: 0 auto; }
 .chat-input { display: flex; gap: 10px; padding: 12px 20px; border-top: 1px solid var(--line); align-items: flex-end; }
 .chat-input textarea { flex: 1; resize: none; min-height: 36px; max-height: 140px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 8px 2px; background: transparent; outline: none; }
 .chat-input textarea:focus { border-bottom-color: var(--ink); }
+@media (max-width: 560px) { #chat-match { padding: 0 10px; font-size: 12px; } }
 .typing { color: var(--muted); font-size: 12px; }
 
 /* The cursor as a lens (js/lens.js) */
