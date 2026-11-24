@@ -35,7 +35,8 @@ function betaSample(a, b) {
 }
 
 export class Coach {
-  constructor({ embed, inspiration, say, leave = null }) {
+  constructor({ embed, inspiration, say, leave = null, matchImages = null }) {
+    this.matchImages = matchImages; // async (text) -> archive photos closest to it in CLIP space
     this.leave = leave;           // () -> go back to the inspiration feed
     this.embed = embed;           // async (list of strings) -> list of vectors, or null
     this.inspiration = inspiration; // (category) -> {item, partner} or null
@@ -168,14 +169,22 @@ export class Coach {
         });
         this.save();
         return this.ask("inspired_next", `That's a start, and it's saved with your sessions (${a.split(/\s+/).length} words). Where next?`,
-          { options: ["Keep going with another prompt", "Work on a writing problem.", "Back to my inspiration feed"] });
+          { options: [...(this.matchImages ? ["Find images that match what I wrote"] : []), "Keep going with another prompt", "Work on a writing problem.", "Back to my inspiration feed"] });
       case "inspired_next":
+        if (a.startsWith("Find images")) {
+          await this.showMatches(s.draft);
+          return this.ask("inspired_next", "Where next?", { options: ["Keep going with another prompt", "Work on a writing problem.", "Back to my inspiration feed"] });
+        }
         if (a.startsWith("Keep going")) return this.writeFrom(s.seed, true);
         if (a.startsWith("Back")) { this.state = null; this.bot("See you in the feed. Tap “Write from this” on anything that pulls at you."); return this.leave?.(); }
         if (!this.data.profile?.name) return this.ask("name", "First, a quick profile. What is your name?", { input: "Your name" });
         return this.askProblem();
 
       case "menu":
+        if (a.startsWith("Find images")) {
+          await this.showMatches(s.draft);
+          return this.ask("menu", "What would you like to do?", { options: ["Work on another writing problem.", "View my previous sessions.", "Exit CreateAI."] });
+        }
         if (a.startsWith("Work on another")) return this.askProblem();
         if (a.startsWith("View")) { this.showHistory(); return this.ask("menu", "Would you like to continue?", { options: ["Work on another writing problem.", "Exit CreateAI."] }); }
         this.state = null;
@@ -189,23 +198,41 @@ export class Coach {
     this.s = { seed };
     const words = seed.words?.length ? seed.words : ["quiet"];
     const [w1, w2 = w1] = words;
+    const pair = Boolean(seed.partner); // a photo with a passage, or one image on its own
     const prompts = [
       `Write the minute before this photo was taken. Keep it ${w1}.`,
-      `Someone from the passage walks into this photo. What do they notice first? Make it feel ${w1} and ${w2}.`,
       `Describe what is just outside the frame. Let it be ${w2}.`,
-      `Borrow one phrase from the passage and use it as the first line of a scene set in this photo.`,
       `Write this place as a memory, ten years later. Keep one ${w1} detail exact.`,
-      `Give the photo a voice. What would it say about the passage beside it?`,
+      ...(pair ? [
+        `Someone from the passage walks into this photo. What do they notice first? Make it feel ${w1} and ${w2}.`,
+        `Borrow one phrase from the passage and use it as the first line of a scene set in this photo.`,
+        `Give the photo a voice. What would it say about the passage beside it?`,
+      ] : [
+        `Pick one person or object in this image and write what it wants. Make it feel ${w1}.`,
+        `Give this image a voice. What would it say if it could speak? Keep it ${w2}.`,
+        `Write the story of how this image ended up in an archive.`,
+      ]),
     ];
     const pool = prompts.filter((p) => p !== seed.lastPrompt);
     const prompt = pool[Math.floor(Math.random() * pool.length)];
     seed.lastPrompt = prompt;
     this.s.prompt = prompt;
     if (!again) {
-      const read = seed.words?.length ? ` ${seed.room ? "This room feels" : "They both feel"} ${seed.words.join(" · ")}.` : "";
-      this.bot(`${seed.room ? `Let's write from “${seed.room}”.` : "Let's write from this pair."}${read}`, { card: seed.item ? { item: seed.item, partner: seed.partner } : null });
+      const read = seed.words?.length ? ` ${seed.room ? "This room feels" : pair ? "They both feel" : "It feels"} ${seed.words.join(" · ")}.` : "";
+      this.bot(`${seed.room ? `Let's write from “${seed.room}”.` : pair ? "Let's write from this pair." : "Let's write from this image."}${read}`, { card: seed.item ? { item: seed.item, partner: seed.partner } : null });
     }
     this.ask("inspired", `Prompt: ${prompt}\n\nWrite a few lines. Rough is fine.`, { input: "Your first lines", multiline: true, options: ["Another prompt"] });
+  }
+
+  // Pair your own writing with images: CLIP reads your words and finds the archive photos closest to them.
+  async showMatches(text) {
+    if (!text || !this.matchImages) return;
+    this.state = "thinking";
+    this.bot("Looking for images that match your words… (the first time loads the AI, about a minute)");
+    let found = [];
+    try { found = await this.matchImages(text); } catch (e) { found = []; }
+    if (!found.length) return this.bot("I couldn't load the image matcher just now. Check your connection and try again.");
+    this.bot("These photos from the archive sit closest to what you wrote. ♥ any you want to keep:", { cards: found });
   }
 
   askProblem() {
@@ -325,7 +352,7 @@ export class Coach {
     this.data.history.push(record);
     this.save();
     this.bot(`Session summary\nDiagnosis: ${s.category}\nExercise: ${s.exercise}\nDid it help? ${s.helped}\nProgress: ${s.progress}\nNext action: ${s.next_action}\n\nYour session has been saved.`);
-    this.ask("menu", "What would you like to do?", { options: ["Work on another writing problem.", "View my previous sessions.", "Exit CreateAI."] });
+    this.ask("menu", "What would you like to do?", { options: [...(this.matchImages && s.draft ? ["Find images that match my draft."] : []), "Work on another writing problem.", "View my previous sessions.", "Exit CreateAI."] });
   }
 
   showHistory() {

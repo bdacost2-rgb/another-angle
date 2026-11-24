@@ -267,3 +267,15 @@ img.photo:hover, .pick[aria-pressed="true"] img { filter: none; }
   .reveal-dial:not(.is-strong):nth-child(n+7) { display: none; }
   .reveal-words { inset: -40px -6vw; }
 }
+
+/* the coach pairing your writing with archive photos */
+.mini-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; max-width: 560px; }
+.mini-match { margin: 0; display: grid; gap: 6px; min-width: 0; }
+.mini-match img { width: 100%; aspect-ratio: 4 / 5; object-fit: cover; display: block; background: var(--chip); }
+.mini-match figcaption { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; color: var(--muted); }
+.mini-match figcaption span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.mini-match button { flex: none; width: 28px; height: 28px; padding: 0; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: transparent; color: var(--ink); cursor: pointer; }
+.mini-match button svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.mini-match button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.mini-match button[aria-pressed="true"] svg { fill: currentColor; }
+@media (max-width: 560px) { .mini-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

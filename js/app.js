@@ -489,8 +489,9 @@ function pairCard(lead, partner) {
     photo ? heartBtn(photo) : null,
     text ? heartBtn(text) : null,
     el("span", { class: "grow" }),
-    photo && text ? el("button", { title: "Write from this pair in the writing coach", onclick: () => {
-      openCoach({ item: photo, partner: text, words: shared.length ? shared : strongestWords(itemDials(photo, DIALS), DIALS, 2) });
+    photo || text ? el("button", { title: photo ? "Write from this image in the writing coach" : "Write from this passage in the writing coach", onclick: () => {
+      const image = photo || T.partnerFor(text);
+      openCoach({ item: image, partner: text || null, words: shared.length ? shared : strongestWords(itemDials(photo || text, DIALS), DIALS, 2) });
     } }, icon("write"), "Write") : null,
     el("button", { title: "More like this", onclick: () => { mode = { kind: "similar", item: lead }; resetFeed(); window.scrollTo(0, 0); } }, icon("similar"), "More like this"),
     el("button", { "aria-label": "Less like this", title: "Less like this", onclick: () => {
@@ -612,6 +613,12 @@ function openCoach(seed = null) {
         return lead ? { item: lead, partner: T.partnerFor(lead) } : null;
       },
       say: renderMsg,
+      // your words -> CLIP text vector -> the closest archive photos (the same shared meaning space as everything else)
+      matchImages: async (text) => {
+        if (!A || !T) return [];
+        const v = await models.clipText(String(text).slice(0, 300));
+        return T.nearest(centerQuery(A, v, "text"), 3, "photo", brokenImages);
+      },
     });
   }
   if (seed) coach.writeFrom(seed);
@@ -630,6 +637,20 @@ function renderMsg(m) {
       el("img", { src: item.img, alt: item.title || "", onerror: (e) => e.target.remove() }),
       partner ? el("p", {}, partner.text.slice(0, 220) + (partner.text.length > 220 ? "…" : "")) : null,
       el("small", {}, [item.title, partner && partner.creator].filter(Boolean).join(" · "))));
+  }
+  if (m.cards?.length) {
+    chat.append(el("div", { class: "mini-cards" }, m.cards.map((item) => {
+      const saved = T?.labels.get(item.id)?.y === 1;
+      const heart = el("button", { type: "button", "aria-pressed": String(saved), "aria-label": `Save ${item.title || "this photo"}`, onclick: () => {
+        const now = heart.getAttribute("aria-pressed") !== "true";
+        heart.setAttribute("aria-pressed", String(now));
+        if (now) T.label(item, 1); else T.unlabel(item);
+        updateSaved();
+      } }, icon("heart"));
+      return el("figure", { class: "mini-match" },
+        el("img", { src: item.img, alt: item.title || "", onerror: (e) => e.target.closest("figure").remove() }),
+        el("figcaption", {}, el("span", {}, [item.title, item.date?.slice(0, 4)].filter(Boolean).join(" · ")), heart));
+    })));
   }
   if (m.options) {
     const box = el("div", { class: "opts" });
@@ -735,8 +756,9 @@ async function main() {
   if (location.hash === "#write") {
     let handoff = null;
     try { handoff = JSON.parse(localStorage.getItem("anotherangle.handoff.v1") || "null"); localStorage.removeItem("anotherangle.handoff.v1"); } catch { /* ignore */ }
-    const photo = handoff?.photo ? T.byId.get(handoff.photo) : null;
-    const text = handoff?.text ? T.byId.get(handoff.text) : photo ? T.partnerFor(photo) : null;
+    let photo = handoff?.photo ? T.byId.get(handoff.photo) : null;
+    const text = handoff?.text ? T.byId.get(handoff.text) : null;
+    if (!photo && text) photo = T.partnerFor(text); // a passage still gets an image to look at
     if (T.count < PICKS_NEEDED) renderPicks();
     openCoach({ item: photo, partner: text, words: handoff?.words || [], room: handoff?.room || null });
     setupWelcome("coach", { pick: () => (!$("#view-coach").hidden ? "coach" : "feed") });

@@ -295,6 +295,8 @@ label.k span { text-transform: none; opacity: .7; }
 .gallery-credit-list dt { color: var(--muted); }
 .gallery-credit-list dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
 .gallery-detail-copy a { color: var(--warm); text-underline-offset: 3px; }
+.gallery-write-from { display: block; width: 100%; margin: 18px 0 4px; min-height: 44px; border: 1px solid var(--warm); background: var(--warm); color: #16141c; font: 500 14px var(--body); cursor: pointer; }
+.gallery-write-from:hover, .gallery-write-from:focus-visible { filter: brightness(1.08); outline: none; }
 .gallery-related { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--line); }
 .gallery-related button { width: 100%; padding: 12px; border: 1px solid var(--line); background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
 .gallery-related button:hover { border-color: var(--ink); }
@@ -479,7 +481,7 @@ details.how[open] summary h2::after { content: " −"; }
             <div class="gallery-loader" aria-hidden="true"><span id="gallery-load">0</span></div>
           </div>
           <div class="gallery-notice" id="gallery-notice" role="status" aria-live="polite"></div>
-          <div class="gallery-end" id="gallery-end" aria-hidden="true"><small class="gallery-label">the end of your walk · where next?</small><div><button type="button" id="gallery-loop" tabindex="-1">Round again ↺</button><button type="button" id="gallery-write" tabindex="-1">Write from this room →</button><button type="button" id="gallery-explore" tabindex="-1">Explore further →</button></div></div>
+          <div class="gallery-end" id="gallery-end" aria-hidden="true"><small class="gallery-label">the end of your walk · where next?</small><div><button type="button" id="gallery-loop" tabindex="-1">Round again ↺</button><button type="button" id="gallery-explore" tabindex="-1">Explore further →</button></div></div>
           <div class="gallery-scroll-cue gallery-label" id="gallery-tip">Scroll to walk · click a work</div>
           <div class="gallery-hud gallery-hud--bottom">
             <div class="gallery-caption" id="gallery-caption" aria-live="polite"><strong></strong><small></small></div>

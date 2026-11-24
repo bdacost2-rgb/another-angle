@@ -10,7 +10,7 @@
 //    colors sampled from the room's own photos, and how tight the cluster is sets how clear the air is.
 //    The room's strongest photo becomes a painterly backdrop you walk into.
 import { dot } from "./data.js";
-import { loadDials as loadSharedDials, itemDials } from "./dials.js";
+import { loadDials as loadSharedDials, itemDials, strongestWords } from "./dials.js";
 import { loadHistory, renderHistory, decades, topDecades, yearOf } from "./history.js";
 import { fitsFocus } from "./focus.js";
 
@@ -817,6 +817,10 @@ export function initGallery(items, model, themes = []) {
       section.append(button);
       copy.append(section);
     }
+    const write = node("button", "gallery-write-from", item.kind === "photo" ? "Write from this image →" : "Write from this passage →");
+    write.type = "button";
+    write.addEventListener("click", () => writeFrom(item));
+    copy.append(write);
     renderFeedback(item, copy);
     layout.append(artwork, copy);
     detailLayout.append(layout);
@@ -868,16 +872,16 @@ export function initGallery(items, model, themes = []) {
     endCard.setAttribute("aria-hidden", String(!on));
     endCard.querySelectorAll("button").forEach((b) => (b.tabIndex = on ? 0 : -1));
   }
-  $("#gallery-write")?.addEventListener("click", () => {
-    const room = rooms[roomIndex] || rooms[rooms.length - 1];
-    if (!room) return;
-    const photo = room.works.find((w) => w.kind === "photo");
-    const text = room.works.find((w) => w.kind === "text");
+  // Write from one work: the coach opens with this image (or passage) and a prompt drawn from it.
+  function writeFrom(item) {
+    const words = (dialSet || []).length && item.vec ? strongestWords(itemDials(item, dialSet), dialSet, 2) : [];
+    const photo = item.kind === "photo" ? item : null;
+    const text = item.kind === "text" ? item : null;
     try {
-      localStorage.setItem("anotherangle.handoff.v1", JSON.stringify({ photo: photo?.id || null, text: text?.id || null, words: room.signature || [], room: room.title }));
-    } catch { /* without storage the coach still opens, just without the room */ }
+      localStorage.setItem("anotherangle.handoff.v1", JSON.stringify({ photo: photo?.id || null, text: text?.id || null, words }));
+    } catch { /* without storage the coach still opens, just without the work */ }
     location.href = "index.html#write";
-  });
+  }
   $("#gallery-loop")?.addEventListener("click", () => scrollToDistance(-6)); // round the Sun again, back to Mercury
   $("#gallery-explore")?.addEventListener("click", () => {
     if (galleryMode === "collection") document.querySelector('.rail [data-mode="exploration"]')?.click();
